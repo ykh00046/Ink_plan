@@ -1,0 +1,498 @@
+// INK 요청서 OCR 입력 페이지
+// 이미지 업로드 → Gemini 2.5 Flash (structured output) → 파싱 결과 표시
+// 매칭/머지는 다음 라운드에서.
+
+const GEMINI_ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+const OCR_SYSTEM_PROMPT = `당신은 콘택트렌즈 잉크 생산 문서 전문 OCR 파서입니다.
+이미지는 'INK 요청서'(상단 표)와 '약품요청서'(하단 표)로 구성됩니다.
+
+## INK 요청서 파싱 규칙
+1. 상단 큰 표에서 호기(10~59), 구분(브랜드), 제품명을 추출.
+2. 표 헤더에 표시된 두 날짜와 시프트(주간/야간/명일주간)별로 분리.
+   - 좌측 두 열(주간/야간) = 요청일 D, 우측 한 열(명일주간) = D+1
+3. 호기 번호는 행 좌측의 호기 열에 있음. 좌측의 3F/1F(층) 그룹도 함께 기록.
+4. 구분 컬럼은 브랜드 + 선택적으로 "/액상" 또는 "_M" 같은 하위 공정 구분이 붙음.
+   - brand는 IRIS, PIA, PIA_M, BELLA, ALCON, SOLEKO, From, Bella, TEST 등의 핵심 키워드.
+   - variant는 "액상", "M" 같은 하위 구분. 없으면 빈 문자열.
+5. 제품명은 원본 그대로 추출 (특수문자, 숫자, %, 언더스코어, 공백 모두 포함).
+6. 행 전체가 TEST이거나 제품명이 비어있으면 건너뛰지 말고 product_name="TEST" 그대로 기록.
+7. 빈 셀(브랜드도 제품명도 없음)은 그 row를 생략.
+
+## 약품요청서 파싱 규칙
+1. 하단 작은 표에서 약품명 코드, 농도(구분), 3F/1F 대수를 추출.
+2. 대수가 비어있으면 null.
+3. "N-TOP"의 "추가 필요량" 칸도 그대로 추출.
+
+## 날짜 형식
+- "2026년 05월 12일 (화)" → "2026-05-12"
+- 헤더에 표시된 요청일을 request_date로 기록.`;
+
+const OCR_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    request_date: { type: 'string', description: '요청일 YYYY-MM-DD' },
+    next_date: { type: 'string', description: '명일 YYYY-MM-DD' },
+    shifts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          shift: { type: 'string', enum: ['주간', '야간', '명일주간'] },
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                machine_no: { type: 'integer' },
+                floor: { type: 'string', description: '3F 또는 1F. 모르면 빈 문자열' },
+                brand: { type: 'string' },
+                variant: { type: 'string', description: '액상/M 등. 없으면 빈 문자열' },
+                product_name: { type: 'string' },
+              },
+              required: ['machine_no', 'brand', 'product_name'],
+            },
+          },
+        },
+        required: ['shift', 'rows'],
+      },
+    },
+    chemicals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          grade: { type: 'string' },
+          qty_3f: { type: 'number', nullable: true },
+          qty_1f: { type: 'number', nullable: true },
+          note: { type: 'string' },
+        },
+        required: ['code'],
+      },
+    },
+  },
+  required: ['request_date', 'shifts'],
+};
+
+// 이미지를 캔버스로 다운스케일 + JPEG 압축 → 토큰 절약·전송시간 단축
+async function compressImage(file, maxDim = 1600, quality = 0.85) {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  try {
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('이미지 로드 실패'));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+
+  const origW = img.naturalWidth, origH = img.naturalHeight;
+  const scale = Math.min(1, maxDim / Math.max(origW, origH));
+  const w = Math.round(origW * scale);
+  const h = Math.round(origH * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  // 표·글자 보존: high-quality interpolation
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+  const comma = dataUrl.indexOf(',');
+  const base64 = dataUrl.slice(comma + 1);
+  // base64 길이 → 대략 바이트 수 (4 base64 chars = 3 bytes)
+  const bytes = Math.round(base64.length * 0.75);
+  return {
+    base64,
+    mime: 'image/jpeg',
+    info: { origW, origH, w, h, bytes },
+  };
+}
+
+async function callGemini(apiKey, model, file) {
+  // 1) 이미지 압축 (1600px / JPEG 0.85)
+  const t0 = performance.now();
+  const compressed = await compressImage(file, 1600, 0.85);
+  const compressMs = Math.round(performance.now() - t0);
+
+  const body = {
+    contents: [{
+      parts: [
+        { text: OCR_SYSTEM_PROMPT },
+        { inline_data: { mime_type: compressed.mime, data: compressed.base64 } },
+        { text: '이 이미지를 파싱하여 구조화된 JSON으로 반환하세요.' },
+      ],
+    }],
+    generationConfig: {
+      response_mime_type: 'application/json',
+      response_schema: OCR_RESPONSE_SCHEMA,
+      temperature: 0.1,
+      // 2) thinking 끄기 (gemini-2.5-flash 계열 지원) — 표 OCR은 추론 거의 불필요
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  };
+
+  const res = await fetch(`${GEMINI_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = j.error?.message || JSON.stringify(j); } catch (e) { detail = await res.text(); }
+    if (res.status === 429) {
+      throw new Error(`한도 초과 (${model}): RPM 또는 RPD 한도에 걸렸어. 설정에서 더 큰 한도 모델(예: gemini-3.1-flash-lite)로 바꾸거나 잠시 후 재시도.\n\n원문: ${detail}`);
+    }
+    throw new Error(`Gemini ${res.status}: ${detail}`);
+  }
+
+  const json = await res.json();
+  const textPart = json.candidates?.[0]?.content?.parts?.find(p => p.text)?.text;
+  if (!textPart) throw new Error('빈 응답: ' + JSON.stringify(json).slice(0, 200));
+
+  let parsed;
+  try { parsed = JSON.parse(textPart); }
+  catch (e) { throw new Error('JSON 파싱 실패: ' + textPart.slice(0, 200)); }
+
+  return {
+    parsed,
+    usage: json.usageMetadata,
+    image: compressed.info,
+    compressMs,
+  };
+}
+
+function OcrImportPage({ ctx }) {
+  const { apiKey, geminiModel, notify, setOcrResult, setView } = ctx;
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | uploading | parsing | done | error
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [usage, setUsage] = useState(null);
+  const [showRaw, setShowRaw] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const inputRef = useRef(null);
+
+  // Cleanup blob URL
+  useEffect(() => {
+    if (!previewUrl) return undefined;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const pickFile = (f) => {
+    if (!f) return;
+    if (!f.type.startsWith('image/')) {
+      setError('이미지 파일만 업로드 가능합니다.');
+      setStatus('error');
+      return;
+    }
+    setFile(f);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(f));
+    setResult(null);
+    setError('');
+    setStatus('idle');
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    pickFile(e.dataTransfer.files?.[0]);
+  };
+
+  const onPaste = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (item) pickFile(item.getAsFile());
+  };
+
+  useEffect(() => {
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  });
+
+  const run = async () => {
+    if (!apiKey) {
+      setError('우측 상단 [설정]에서 Gemini API 키를 먼저 입력하세요.');
+      setStatus('error');
+      return;
+    }
+    if (!file) return;
+    setStatus('parsing');
+    setError('');
+    setResult(null);
+    setElapsed(0);
+    const t0 = performance.now();
+    const tick = setInterval(() => setElapsed(Math.round((performance.now() - t0) / 100) / 10), 100);
+    try {
+      const { parsed, usage: u, image, compressMs } = await callGemini(apiKey, geminiModel, file);
+      const totalMs = Math.round(performance.now() - t0);
+      setResult(parsed);
+      setUsage({ ...u, ms: totalMs, compressMs, image, model: geminiModel });
+      setStatus('done');
+      // 검수 페이지로 전달할 수 있도록 보존
+      setOcrResult({
+        parsed,
+        sourceImageUrl: previewUrl,
+        sourceFileName: file.name,
+        parsedAt: new Date().toISOString(),
+        model: geminiModel,
+      });
+      notify(`OCR 완료 (${(totalMs / 1000).toFixed(1)}s) — 검수 페이지로 이동`);
+      // 자동으로 검수 페이지로 이동
+      setView('review');
+    } catch (e) {
+      setError(String(e.message || e));
+      setStatus('error');
+    } finally {
+      clearInterval(tick);
+    }
+  };
+
+  const stats = useMemo(() => {
+    if (!result) return null;
+    const totalRows = (result.shifts || []).reduce((s, sh) => s + (sh.rows?.length || 0), 0);
+    const machines = new Set();
+    for (const sh of result.shifts || []) for (const r of sh.rows || []) machines.add(r.machine_no);
+    return { totalRows, machines: machines.size, chemicals: result.chemicals?.length || 0 };
+  }, [result]);
+
+  return (
+    <div className="page">
+      <div className="page__head">
+        <div className="page__title-row">
+          <div>
+            <div className="page__title">INK 요청서 입력</div>
+            <div className="page__meta">현장 스캔 이미지 → Gemini Vision으로 자동 파싱 · 검수 후 사출계획에 반영</div>
+          </div>
+          <div className="page__actions">
+            <Pill tone={apiKey ? 'ok' : 'warn'}>{apiKey ? 'API 연결됨' : 'API 키 없음'}</Pill>
+            <button className="btn" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); setError(''); setStatus('idle'); }}>
+              <Icon name="refresh" /> 새로 시작
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="page__body">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+
+          {/* 좌측: 업로드 + 이미지 미리보기 */}
+          <Card title="원본 이미지">
+            {!file && (
+              <div
+                onDrop={onDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => inputRef.current?.click()}
+                style={{
+                  border: '2px dashed var(--ink-300)',
+                  borderRadius: 12,
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: 'var(--ink-50)',
+                  transition: 'all .12s',
+                }}
+                onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--brand-500)'; e.currentTarget.style.background = 'var(--brand-50)'; }}
+                onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--ink-300)'; e.currentTarget.style.background = 'var(--ink-50)'; }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: 'var(--ink-500)' }}>
+                  <Icon name="image" size={32} />
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink-800)', marginBottom: 4 }}>
+                  이미지를 드롭하거나 클릭해서 선택
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>
+                  PNG · JPG · WEBP · 페이지에서 Ctrl+V로 붙여넣기도 가능
+                </div>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={e => pickFile(e.target.files?.[0])}
+                  style={{ display: 'none' }}
+                />
+              </div>
+            )}
+
+            {file && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--ink-600)' }}>
+                  <Icon name="image" size={14} />
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                  <span style={{ color: 'var(--ink-500)' }}>{(file.size / 1024).toFixed(1)} KB</span>
+                  <button className="btn" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); }} title="제거">
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+                <div style={{ background: 'var(--ink-50)', borderRadius: 8, padding: 8, maxHeight: 'calc(100vh - 320px)', overflow: 'auto' }}>
+                  <img src={previewUrl} alt="원본" style={{ width: '100%', borderRadius: 4, display: 'block' }} />
+                </div>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn--primary"
+                    onClick={run}
+                    disabled={status === 'parsing'}
+                    style={{ flex: 1 }}
+                  >
+                    {status === 'parsing'
+                      ? <><Icon name="refresh" size={12} /> 파싱 중...</>
+                      : <><Icon name="sparkle" size={12} /> Gemini로 파싱</>}
+                  </button>
+                </div>
+              </>
+            )}
+          </Card>
+
+          {/* 우측: 파싱 결과 */}
+          <Card
+            title="파싱 결과"
+            actions={result && <button className="btn" onClick={() => setShowRaw(s => !s)}><Icon name="settings" size={12} /> {showRaw ? '표 보기' : 'Raw JSON'}</button>}
+          >
+            {status === 'idle' && !file && (
+              <EmptyState text="이미지를 업로드하면 결과가 여기에 표시됩니다." />
+            )}
+            {status === 'idle' && file && (
+              <EmptyState text="좌측에서 [Gemini로 파싱] 버튼을 눌러 시작하세요." />
+            )}
+            {status === 'parsing' && (
+              <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <div className="spinner" />
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--ink-600)' }}>
+                  이미지 분석 중... <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--brand-700)', fontWeight: 600 }}>{elapsed.toFixed(1)}s</span>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-500)' }}>
+                  이미지 압축 → Gemini 호출 → 응답 파싱
+                </div>
+              </div>
+            )}
+            {status === 'error' && (
+              <div style={{ padding: 16, background: 'var(--bad-50)', border: '1px solid var(--bad-300)', borderRadius: 8, color: 'var(--bad-700)' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="x" size={14} /> 오류
+                </div>
+                <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</div>
+              </div>
+            )}
+            {status === 'done' && result && (
+              <ResultView result={result} usage={usage} stats={stats} showRaw={showRaw} onReview={() => setView('review')} />
+            )}
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ text }) {
+  return (
+    <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-500)', fontSize: 12 }}>
+      {text}
+    </div>
+  );
+}
+
+function ResultView({ result, usage, stats, showRaw, onReview }) {
+  if (showRaw) {
+    return (
+      <pre style={{
+        background: 'var(--ink-50)', padding: 12, borderRadius: 8, fontSize: 11,
+        fontFamily: 'JetBrains Mono, monospace', maxHeight: 'calc(100vh - 320px)', overflow: 'auto', margin: 0,
+      }}>{JSON.stringify(result, null, 2)}</pre>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, fontSize: 11, flexWrap: 'wrap' }}>
+        <Pill tone="info">요청일 {result.request_date || '?'}</Pill>
+        {result.next_date && <Pill tone="default">명일 {result.next_date}</Pill>}
+        <Pill tone="ok">{stats.totalRows}행</Pill>
+        <Pill tone="ok">{stats.machines}대 호기</Pill>
+        {stats.chemicals > 0 && <Pill tone="default">약품 {stats.chemicals}개</Pill>}
+        {usage && (
+          <span style={{ marginLeft: 'auto', color: 'var(--ink-500)' }}>
+            {usage.model} · {usage.totalTokenCount || '?'} tok · {(usage.ms / 1000).toFixed(1)}s
+            {usage.image && <> · 이미지 {usage.image.w}×{usage.image.h} ({Math.round(usage.image.bytes / 1024)}KB)</>}
+          </span>
+        )}
+      </div>
+
+      <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: 60 }}>호기</th>
+              <th style={{ width: 50 }}>층</th>
+              <th style={{ width: 90 }}>시프트</th>
+              <th style={{ width: 110 }}>브랜드</th>
+              <th style={{ width: 70 }}>variant</th>
+              <th>제품명</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(result.shifts || []).flatMap(sh =>
+              (sh.rows || []).map((r, i) => (
+                <tr key={`${sh.shift}-${r.machine_no}-${i}`}>
+                  <td style={{ fontWeight: 600 }}>{r.machine_no}</td>
+                  <td style={{ color: 'var(--ink-500)' }}>{r.floor || ''}</td>
+                  <td>
+                    <Pill tone={sh.shift === '주간' ? 'info' : sh.shift === '야간' ? 'default' : 'warn'}>{sh.shift}</Pill>
+                  </td>
+                  <td>{r.brand}</td>
+                  <td style={{ color: 'var(--ink-500)' }}>{r.variant || ''}</td>
+                  <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{r.product_name}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {result.chemicals && result.chemicals.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
+            약품요청서
+          </div>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>코드</th>
+                <th style={{ width: 60 }}>등급</th>
+                <th style={{ width: 70, textAlign: 'right' }}>3F</th>
+                <th style={{ width: 70, textAlign: 'right' }}>1F</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.chemicals.map((c, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{c.code}</td>
+                  <td>{c.grade}</td>
+                  <td style={{ textAlign: 'right' }}>{c.qty_3f ?? ''}</td>
+                  <td style={{ textAlign: 'right' }}>{c.qty_1f ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center', padding: 12, background: 'var(--brand-50)', borderRadius: 8 }}>
+        <div style={{ flex: 1, fontSize: 12, color: 'var(--ink-700)', lineHeight: 1.5 }}>
+          <strong>다음 단계</strong>: 제품명을 마스터와 매칭하고 필요 시 마스터를 현장 표기로 정정합니다.
+        </div>
+        <button className="btn btn--primary" onClick={onReview}>
+          <Icon name="arrow" size={12} /> 검수 시작
+        </button>
+      </div>
+    </>
+  );
+}
+
+window.OcrImportPage = OcrImportPage;
