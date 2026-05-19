@@ -64,11 +64,16 @@ class Handler(SimpleHTTPRequestHandler):
         return decoded.startswith(BLOCKED_STATIC_PREFIXES)
 
     def read_body_json(self):
+        # Content-Length 헤더를 신뢰하지 않고 실제 읽은 바이트로 상한 검증.
+        # (헤더가 본문보다 작거나 위조된 경우 방어). 한 바이트 더 읽어 초과 판정.
         length = int(self.headers.get("Content-Length", "0"))
         if length > MAX_BODY_BYTES:
             raise ValueError(f"request body too large ({length} bytes)")
-        raw = self.rfile.read(length).decode("utf-8")
-        return json.loads(raw) if raw else None
+        raw = self.rfile.read(min(length, MAX_BODY_BYTES + 1))
+        if len(raw) > MAX_BODY_BYTES:
+            raise ValueError("request body too large")
+        text = raw.decode("utf-8")
+        return json.loads(text) if text else None
 
     def do_GET(self):
         parsed = urlparse(self.path)

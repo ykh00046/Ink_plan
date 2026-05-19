@@ -203,6 +203,15 @@ function OcrImportPage({ ctx }) {
     setStatus('idle');
   };
 
+  // 파일을 data URL 문자열로 읽기 — blob URL과 달리 페이지 생명주기와 무관해
+  // 검수 페이지로 안전하게 넘길 수 있다(revoke 관리 불필요).
+  const fileToDataUrl = (f) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('파일 읽기 실패'));
+    reader.readAsDataURL(f);
+  });
+
   const onDrop = (e) => {
     e.preventDefault();
     pickFile(e.dataTransfer.files?.[0]);
@@ -237,10 +246,15 @@ function OcrImportPage({ ctx }) {
       setResult(parsed);
       setUsage({ ...u, ms: totalMs, compressMs, image, model: geminiModel });
       setStatus('done');
-      // 검수 페이지로 전달할 수 있도록 보존
+      // 검수 페이지로 전달할 수 있도록 보존.
+      // blob(previewUrl)은 이 페이지 언마운트 시 revoke되므로, 생명주기와
+      // 무관한 data URL로 변환해 넘긴다(검수 페이지에서 원본 이미지 표시 가능).
+      let sourceImageUrl = '';
+      try { sourceImageUrl = await fileToDataUrl(file); }
+      catch (e) { console.warn('원본 이미지 data URL 변환 실패:', e); }
       setOcrResult({
         parsed,
-        sourceImageUrl: previewUrl,
+        sourceImageUrl,
         sourceFileName: file.name,
         parsedAt: new Date().toISOString(),
         model: geminiModel,
