@@ -239,6 +239,21 @@ button { background: none; border: none; cursor: pointer; }
   flex-shrink: 0;
 }
 .sb-item.active .sb-item__icon { color: var(--brand-600); }
+.sb-item__step {
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--ink-200);
+  color: var(--ink-600);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.sb-item.active .sb-item__step {
+  background: var(--brand-500);
+  color: white;
+}
 .sb-item__badge {
   margin-left: auto;
   font-size: 10px;
@@ -297,6 +312,61 @@ button { background: none; border: none; cursor: pointer; }
   gap: 6px;
   align-items: center;
 }
+
+/* 페이지 메타 인라인 칩 (정식/테스트 수, 오늘 요일 등) */
+.page__meta-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-500);
+}
+.page__meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ink-100);
+  color: var(--ink-700);
+  font-weight: 500;
+}
+.page__meta-chip strong { color: var(--ink-900); font-weight: 600; }
+.page__meta-chip--today {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.page__meta-chip--warn {
+  background: var(--warn-100);
+  color: var(--warn-600);
+}
+
+/* 버튼 강조 variants (공통) */
+.btn--emphasis-brand {
+  background: var(--brand-50);
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+  font-weight: 600;
+}
+.btn--emphasis-brand:hover {
+  background: var(--brand-100);
+}
+.btn--emphasis-warn {
+  background: var(--warn-50, oklch(0.97 0.04 70));
+  border-color: var(--warn-500);
+  color: var(--warn-600);
+  font-weight: 600;
+}
+.btn--emphasis-warn:hover {
+  background: var(--warn-100);
+}
+.btn--count-badge {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.8;
+  font-weight: 600;
+}
 .page__tabs {
   display: flex;
   gap: 2px;
@@ -350,6 +420,13 @@ button { background: none; border: none; cursor: pointer; }
 .btn--danger { color: var(--bad-600); }
 .btn--danger:hover { background: var(--bad-100); border-color: var(--bad-500); }
 .btn--sm { padding: 3px 8px; font-size: 11px; }
+.btn--lg {
+  height: 38px;
+  padding: 0 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+}
 
 .input {
   padding: 5px 10px;
@@ -402,6 +479,115 @@ button { background: none; border: none; cursor: pointer; }
 }
 .toolbar .spacer { flex: 1; }
 
+.history-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.history-picker {
+  padding: 14px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.history-list__item {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-700);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.history-list__item:hover {
+  background: var(--ink-50);
+}
+
+.history-list__item.active {
+  background: var(--brand-50);
+  border-color: var(--brand-100);
+  color: var(--brand-900);
+}
+
+.history-list__item span,
+.history-list__item small {
+  display: block;
+}
+
+.history-list__item span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.history-list__item small {
+  margin-top: 3px;
+  color: var(--ink-500);
+  font: 10px/1.3 'JetBrains Mono', monospace;
+}
+
+.history-main {
+  min-width: 0;
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.history-summary__item {
+  border: 1px solid var(--ink-200);
+  border-radius: 8px;
+  background: white;
+  padding: 10px 12px;
+}
+
+.history-summary__item span {
+  display: block;
+  color: var(--ink-500);
+  font-size: 11px;
+}
+
+.history-summary__item strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-900);
+  font: 700 20px/1 'JetBrains Mono', monospace;
+}
+
+.history-table-wrap {
+  max-height: calc(100vh - 315px);
+}
+
+.history-table td {
+  vertical-align: top;
+}
+
+@media (max-width: 980px) {
+  .history-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-list {
+    max-height: 180px;
+  }
+
+  .history-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Table */
 .tbl {
   width: 100%;
@@ -428,10 +614,38 @@ button { background: none; border: none; cursor: pointer; }
   top: 0;
   z-index: 2;
 }
-.tbl tr:hover td { background: var(--brand-50); }
+/* Zebra striping (가독성 향상). hover가 zebra 위에 오버라이드. */
+.tbl tbody tr:nth-child(even) td { background: var(--ink-50); }
+.tbl tbody tr:nth-child(even) td.sticky-col,
+.tbl tbody tr:nth-child(even) td.sticky-col-2 { background: var(--ink-100); }
+.tbl tbody tr:hover td { background: var(--brand-50) !important; }
 .tbl td.num { font-variant-numeric: tabular-nums; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; }
 .tbl th.num { text-align: right; }
 .tbl td.muted { color: var(--ink-500); }
+
+/* 빈 상태 표시 (table 안에서 또는 카드 안에서) */
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-500);
+  font-size: 12px;
+}
+.empty-state__title {
+  font-size: 14px;
+  color: var(--ink-700);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.empty-state__hint {
+  font-size: 11px;
+  color: var(--ink-500);
+}
+.empty-state__actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
 .tbl .row-num {
   color: var(--ink-500);
   font-variant-numeric: tabular-nums;
@@ -463,53 +677,45 @@ button { background: none; border: none; cursor: pointer; }
   background: currentColor;
 }
 
-/* Shift cells */
-.shift-cell {
-  display: flex;
+/* ── 사출계획 표 (평평한 셀 디자인) ─────────────────── */
+.injection-machine-head { vertical-align: middle; }
+.injection-machine-cell {
+  font-weight: 600;
+  display: flex !important;
   flex-direction: column;
-  gap: 1px;
-  padding: 3px 0;
+  justify-content: center;
+  line-height: 1.2;
+  padding: 6px 10px !important;
 }
-.shift-pill {
-  font-size: 10.5px;
-  padding: 3px 6px;
-  border-radius: 2px;
-  border-left: 2px solid;
-  background: var(--ink-50);
-  color: var(--ink-800);
-  min-height: 22px;
+.injection-machine-no {
+  font-size: 10px;
+  color: var(--ink-500);
+  font-weight: 500;
+}
+.injection-machine-name {
+  font-size: 12.5px;
+  color: var(--ink-900);
   display: flex;
   align-items: center;
-  cursor: grab;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  border: 1px solid var(--ink-200);
-  border-left-width: 3px;
+  gap: 6px;
 }
-.shift-pill:active { cursor: grabbing; }
-.shift-pill.day { border-left-color: var(--info-600); background: var(--info-100); color: var(--ink-900); }
-.shift-pill.night { border-left-color: var(--brand-700); background: var(--brand-50); color: var(--ink-900); }
-.shift-pill.empty {
-  background: transparent;
-  border: 1px dashed var(--ink-300);
-  color: var(--ink-400);
-  font-style: italic;
-  justify-content: center;
-  font-weight: 400;
+.injection-floor-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
 }
-.shift-pill.drag-over {
-  outline: 2px solid var(--brand-500);
-  outline-offset: -1px;
-}
-.shift-pill.dragging { opacity: 0.4; }
+.injection-floor-badge--f3 { background: var(--brand-100, var(--brand-50)); color: var(--brand-700); }
+.injection-floor-badge--f1 { background: var(--info-100); color: var(--info-600); }
 
-.injection-machine-head {
-  vertical-align: middle;
-}
 .tbl th.injection-day-head {
   min-width: 148px;
   text-align: center;
-  border-left: 1px solid var(--ink-300);
+  border-left: 2px solid var(--ink-300);
+  background: var(--ink-100);
 }
 .tbl th.injection-shift-head {
   top: var(--density-row);
@@ -520,21 +726,103 @@ button { background: none; border: none; cursor: pointer; }
   font-size: 10px;
 }
 .tbl th.injection-shift-head--day,
-.tbl td.injection-shift-cell--day {
-  border-left: 1px solid var(--ink-300);
+.tbl td.injection-cell--day {
+  border-left: 2px solid var(--ink-300);
 }
 .tbl th.injection-shift-head--night,
-.tbl td.injection-shift-cell--night {
+.tbl td.injection-cell--night {
   border-left: 1px solid var(--ink-200);
 }
-.tbl td.injection-shift-cell {
+
+/* 평평한 셀 — pill 모양 제거하고 표 셀 본연의 모습 */
+.tbl td.injection-cell {
   min-width: 74px;
-  padding: 4px;
+  padding: 5px 8px;
+  vertical-align: middle;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--ink-900);
+  position: relative;
+  line-height: 1.3;
+  user-select: none;
+}
+.tbl td.injection-cell:hover {
+  background: var(--brand-50) !important;
+}
+.tbl td.injection-cell--day {
+  /* 주간 = 옅은 푸른 톤 강조선 */
+  box-shadow: inset 3px 0 0 var(--info-600);
+}
+.tbl td.injection-cell--night {
+  /* 야간 = 옅은 진한 톤 */
+  background: var(--ink-50);
+}
+.tbl tbody tr:nth-child(even) td.injection-cell--night {
+  background: var(--ink-100);
+}
+.tbl td.injection-cell--empty .injection-cell__text {
+  color: var(--ink-300);
+  font-style: italic;
+}
+.tbl td.injection-cell--drag-over {
+  outline: 2px solid var(--brand-500) !important;
+  outline-offset: -2px;
+  background: var(--brand-50) !important;
+}
+.tbl td.injection-cell--dragging { opacity: 0.35; }
+.tbl td.injection-cell--test {
+  background: oklch(0.97 0.04 70 / 0.5);
+}
+.injection-cell__text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   vertical-align: middle;
 }
-.injection-shift-cell .shift-pill {
-  min-width: 0;
-  width: 100%;
+.injection-cell__test {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--warn-500);
+  color: white;
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.04em;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.injection-cell__alert {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: none;
+  margin-right: 5px;
+  vertical-align: middle;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.injection-cell__alert--bad { background: var(--bad-500); color: white; }
+.injection-cell__alert--bad:hover { background: var(--bad-600); }
+.injection-cell__alert--warn { background: var(--warn-500); color: white; }
+.injection-cell__alert--warn:hover { background: var(--warn-600); }
+.injection-cell__alert--info { background: var(--info-600); color: white; cursor: default; }
+
+/* 셀 상태 좌측 강조 */
+.tbl td.injection-cell--unregistered {
+  box-shadow: inset 3px 0 0 var(--bad-500);
+  background: linear-gradient(to right, var(--bad-50), transparent 60px);
+}
+.tbl td.injection-cell--new {
+  box-shadow: inset 3px 0 0 var(--info-600);
+  background: linear-gradient(to right, var(--info-50, oklch(0.97 0.04 245)), transparent 60px);
+}
+.tbl td.injection-cell--no-inks {
+  box-shadow: inset 3px 0 0 var(--warn-500);
+  background: linear-gradient(to right, var(--warn-50, oklch(0.97 0.04 70)), transparent 60px);
 }
 
 /* Dashboard cards */
@@ -751,33 +1039,111 @@ button { background: none; border: none; cursor: pointer; }
 }
 .tbl tr:hover td.sticky-col-2 { background: var(--brand-50); }
 
-/* Test pill in injection grid */
-.shift-pill.test {
-  border-left-color: var(--warn-600);
-  background: oklch(0.95 0.10 80);
-  color: oklch(0.40 0.16 60);
-  font-weight: 600;
+/* ── 재고 조사 표 ─────────────────────────────────── */
+.tbl td.inv-ink {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink-900);
   letter-spacing: 0.01em;
+  text-align: left;
+  padding-left: 12px !important;
+  border-right: 2px solid var(--ink-300);
 }
-.shift-pill .test-mark {
-  display: inline-flex;
-  align-items: center;
-  background: var(--warn-600);
+.tbl td.inv-lot-main {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  border-right: 2px solid oklch(0.82 0.06 200);
+}
+.tbl td.inv-life {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  border-right: 2px solid oklch(0.82 0.06 200);
+}
+.inv-life--ok { color: var(--ok-600); }
+.inv-life--warn { color: var(--warn-600); }
+.inv-life--relabel {
+  color: var(--bad-600);
+  background: var(--warn-50, oklch(0.97 0.04 70)) !important;
+}
+.inv-life--expired {
   color: white;
-  padding: 1px 4px;
-  border-radius: 2px;
+  background: var(--bad-500) !important;
+}
+.inv-life--empty { color: var(--ink-400); }
+.tbl td.inv-lot-extra {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  text-align: center;
+}
+.tbl td.inv-lot-empty {
+  color: var(--ink-300);
+  font-style: italic;
+}
+.tbl td.inv-stock {
+  vertical-align: middle;
+  padding: 4px 6px;
+  text-align: center;
+}
+.inv-stock__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.inv-stock__row + .inv-stock__row { margin-top: 3px; }
+/* Lot 차수 칩 */
+.inv-lot-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--ink-200);
+  color: var(--ink-600);
   font-size: 9px;
   font-weight: 700;
-  margin-right: 5px;
-  letter-spacing: 0.05em;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
-
-/* Highlight changed (vs prior day) */
-.shift-pill.changed {
-  background: oklch(0.96 0.13 95);
-  color: oklch(0.35 0.17 60);
+.inv-stock-input {
+  width: 56px;
+  text-align: center;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--ink-300);
+  border-radius: 4px;
+  background: white;
 }
+.inv-stock-input:focus {
+  outline: none;
+  border-color: var(--brand-500);
+  box-shadow: 0 0 0 2px var(--brand-50);
+}
+/* Lot 합계 (잉크에 lot 여러 개일 때) */
+.inv-stock__sum {
+  border-top: 1px solid var(--ink-300);
+  margin-top: 4px;
+  padding-top: 3px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--brand-700);
+}
+/* 일자 셀 좌측 옅은 구분선 */
+.tbl td.inv-stock { border-left: 1px solid oklch(0.92 0.025 90); }
+/* 입력 가능한 셀과 read-only 셀 시각 차이 */
+.inv-stock__display {
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.4;
+}
+.inv-stock__display--empty { color: var(--ink-400); }
+.inv-stock__display--zero { color: var(--bad-600); font-weight: 600; }
+.inv-stock__display--has { color: var(--ink-800); font-weight: 600; }
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -904,6 +1270,23 @@ button { background: none; border: none; cursor: pointer; }
 }
 .inkplan-row:hover td:not(.sticky-col) {
   background: oklch(0.985 0.005 245) !important;
+}
+
+/* 잉크 생산계획 — 재고 조사 연동 범례 */
+.inkplan-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-500);
+  cursor: help;
+}
+.inkplan-legend__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: oklch(0.93 0.05 200);
+  border: 1px solid oklch(0.80 0.07 200);
 }
 
 /* 엑셀식 항상 input 셀 */
@@ -1040,39 +1423,6 @@ button { background: none; border: none; cursor: pointer; }
   font-style: italic;
 }
 
-/* 사출계획 셀 — 마스터 미등록 / 잉크 비어있음 상태 */
-.shift-pill--unregistered {
-  border-left: 3px solid var(--bad-500) !important;
-  background: linear-gradient(to right, var(--bad-50), transparent 40px) !important;
-}
-.shift-pill--no-inks {
-  border-left: 3px solid var(--warn-500) !important;
-  background: linear-gradient(to right, var(--warn-50), transparent 40px) !important;
-}
-.shift-pill__alert {
-  display: inline-flex;
-  align-items: center;
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 4px;
-  border: none;
-  margin-right: 4px;
-  cursor: pointer;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
-.shift-pill__alert--bad {
-  background: var(--bad-500);
-  color: white;
-}
-.shift-pill__alert--bad:hover { background: var(--bad-600); }
-.shift-pill__alert--warn {
-  background: var(--warn-500);
-  color: white;
-}
-.shift-pill__alert--warn:hover { background: var(--warn-600); }
-
 /* CascadePicker (브랜드→제품→잉크) */
 .cascade-col {
   display: flex;
@@ -1143,6 +1493,214 @@ button { background: none; border: none; cursor: pointer; }
   font-style: italic;
 }
 
+/* ── INK 요청서 입력 (ocr-import) ────────────────── */
+.ocr-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.ocr-dropzone {
+  border: 2px dashed var(--ink-300);
+  border-radius: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--ink-50);
+  transition: border-color 0.12s, background 0.12s;
+}
+.ocr-dropzone:hover {
+  border-color: var(--brand-500);
+  background: var(--brand-50);
+}
+.ocr-dropzone__icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: var(--ink-400);
+}
+.ocr-dropzone:hover .ocr-dropzone__icon { color: var(--brand-500); }
+.ocr-dropzone__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-800);
+  margin-bottom: 6px;
+}
+.ocr-dropzone__hint {
+  font-size: 11px;
+  color: var(--ink-500);
+  line-height: 1.6;
+}
+.ocr-file-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: var(--ink-50);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-700);
+}
+.ocr-file-bar__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--ink-900);
+}
+.ocr-file-bar__size {
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+}
+.ocr-preview {
+  background: var(--ink-100);
+  border-radius: 8px;
+  padding: 6px;
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+}
+.ocr-preview img {
+  width: 100%;
+  border-radius: 4px;
+  display: block;
+}
+.ocr-run-btn {
+  margin-top: 12px;
+  width: 100%;
+  height: 36px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 진행/에러 상태 박스 */
+.ocr-status {
+  padding: 40px 20px;
+  text-align: center;
+}
+.ocr-status__time {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--ink-600);
+}
+.ocr-status__time strong {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--brand-700);
+  font-weight: 600;
+  margin: 0 4px;
+}
+.ocr-status__substep {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-500);
+}
+.ocr-error {
+  padding: 16px;
+  background: var(--bad-50, oklch(0.97 0.04 25));
+  border: 1px solid var(--bad-300, oklch(0.85 0.12 25));
+  border-radius: 8px;
+  color: var(--bad-600);
+}
+.ocr-error__title {
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.ocr-error__detail {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--bad-700, oklch(0.40 0.16 25));
+}
+
+/* ── 제품명 검수 — 진행률 바 ──────────────────────── */
+.review-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+.review-progress__bar {
+  flex: 1;
+  height: 6px;
+  background: var(--ink-200);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.review-progress__fill {
+  height: 100%;
+  background: var(--brand-500);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+.review-progress__stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+.review-progress__stat strong {
+  color: var(--ink-900);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.review-progress__stat--auto { color: var(--ink-500); }
+.review-progress__stat--pending {
+  color: var(--warn-600);
+  font-weight: 600;
+}
+.review-progress__stat--done {
+  color: var(--ok-600);
+  font-weight: 600;
+}
+
+/* ── 넣어줄 잉크 — 큰 층 전환 탭 ──────────────────── */
+.floor-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.floor-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 16px;
+  border: 1px solid var(--ink-300);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.floor-tab:hover {
+  border-color: var(--brand-400);
+  background: var(--brand-50);
+}
+.floor-tab.active {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+}
+.floor-tab__label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-800);
+}
+.floor-tab.active .floor-tab__label { color: white; }
+.floor-tab__sub {
+  font-size: 11px;
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+}
+.floor-tab.active .floor-tab__sub { color: oklch(0.90 0.04 245); }
+
 /* Spinner (OCR 진행 표시) */
 .spinner {
   display: inline-block;
@@ -1157,7 +1715,27 @@ button { background: none; border: none; cursor: pointer; }
   to { transform: rotate(360deg); }
 }
 
-/* Print-ish style for printing later */
+/* Print — 표 중심 인쇄 (넣어줄 잉크 등). inventory.jsx는 자체 print 스타일 별도 주입. */
 @media print {
-  .app__sidebar, .app__header, .toolbar, .page__actions { display: none; }
+  @page { size: A4 portrait; margin: 12mm; }
+  .app__sidebar, .app__header, .toolbar, .page__actions,
+  .floor-tabs, .twk-panel, .toast { display: none !important; }
+  .app { display: block !important; height: auto !important; }
+  .app__main { overflow: visible !important; }
+  .page, .page__body { height: auto !important; padding: 0 !important; }
+  .page__head { border: 0 !important; padding: 0 0 8px !important; }
+  .card, .card__body { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
+  .tbl-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+  }
+  table.tbl { width: 100% !important; }
+  table.tbl thead { display: table-header-group !important; }
+  table.tbl th, table.tbl td {
+    border: 0.5pt solid #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  table.tbl tbody tr { page-break-inside: avoid !important; }
 }

@@ -1,7 +1,7 @@
 // 잉크 재고 조사표 v4
 // - 컬럼: # | 잉크명 | 최초 Lot | (기록된 일자들) | 2차 Lot | 3차 Lot | [+Lot]
 //   · 2차/3차 Lot 은 오른쪽 끝, 인쇄 시 숨김 (.col-lot-extra)
-// - 일자 컬럼은 자동 생성 X. [이어서 생성] 버튼으로만 오늘 컬럼 추가
+// - 오늘 일자 컬럼은 자동 생성. [이어서 생성] 버튼은 수동 보조 동작으로 유지
 //   · 마지막 기록 일자 = 입력 가능 (current). 그 외 과거는 read-only
 // - 가독성:
 //   · # 회색, 잉크명 흰색(가장 진한 글씨), 최초Lot 옅은 청록, 2/3차 옅은 회색
@@ -15,7 +15,6 @@ function InventoryPage({ ctx }) {
   const [today, setToday] = useState(() => localDateISO());
   const [viewRange, setViewRange] = useState('3days'); // today | 3days | all
   const [search, setSearch] = useState('');
-  const [sortDir, setSortDir] = useState('asc');
   const [newLot, setNewLot] = useState('');
   const [addingFor, setAddingFor] = useState(null);
   const [addingLotNo, setAddingLotNo] = useState('');
@@ -24,6 +23,7 @@ function InventoryPage({ ctx }) {
   const [bulkResult, setBulkResult] = useState(null);
   const newLotRef = useRef(null);
   const addingRef = useRef(null);
+  const autoCreatedTodayRef = useRef(false);
 
   // ── inventory 초기화 ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -94,30 +94,62 @@ function InventoryPage({ ctx }) {
   const inv = data.inventory || { lots: [], daily: {} };
   const inkNames = useMemo(() => (data.inkPlan || []).map(i => i.name), [data.inkPlan]);
 
-  // ── 컬럼 영역별 배경 톤 ──────────────────────────────────────────────────
+  // ── 컬럼 영역별 배경 톤 (화면용은 부드럽게, 인쇄용은 별도 처리) ────────
   const BG = {
     num:        'var(--ink-100)',
-    ink:        null,                          // 흰색 (anchor)
-    lotMain:    'oklch(0.95 0.04 200)',        // 최초 Lot — 옅은 청록 (강조)
-    lotMainHdr: 'oklch(0.88 0.08 200)',        // 최초 Lot 헤더 — 진한 청록
-    lotExtra:   'oklch(0.97 0.012 250)',       // 2차/3차 Lot — 옅은 회색
-    date:       'oklch(0.97 0.022 90)',        // 일자 — 옅은 노란
-    dateHdr:    'oklch(0.92 0.045 90)',        // 일자 헤더
-    today:      'oklch(0.93 0.055 90)',        // 오늘 — 진한 노란
-    todayHdr:   'oklch(0.85 0.10 90)',         // 오늘 헤더
-    create:     'oklch(0.95 0.06 150)',        // 이어서 생성 컬럼
+    ink:        null,
+    lotMain:    'oklch(0.97 0.02 200)',        // 최초 Lot — 매우 옅은 청록
+    lotMainHdr: 'oklch(0.94 0.04 200)',        // 최초 Lot 헤더
+    lotExtra:   'oklch(0.985 0.008 250)',      // 2차/3차 Lot — 거의 흰색
+    date:       'oklch(0.985 0.012 90)',       // 일자 — 거의 흰색에 살짝 노란
+    dateHdr:    'oklch(0.96 0.025 90)',        // 일자 헤더 — 옅은 노란
+    today:      'oklch(0.97 0.04 90)',         // 오늘 — 옅은 노란
+    todayHdr:   'oklch(0.92 0.07 90)',         // 오늘 헤더 — 노란
+    create:     'oklch(0.97 0.03 150)',        // 이어서 생성 컬럼
   };
 
   // ── 날짜 헬퍼 ────────────────────────────────────────────────────────────
   const addDays = (iso, n) => {
-    const d = new Date(iso); d.setDate(d.getDate() + n);
-    return d.toISOString().slice(0, 10);
+    const d = parseDateLocal(iso);
+    if (!d) return iso;
+    d.setDate(d.getDate() + n);
+    return localDateISO(d);
   };
   const fmtDate = (iso) => {
-    const d = new Date(iso);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+    const d = parseDateLocal(iso);
+    return d ? `${d.getMonth() + 1}/${d.getDate()}` : '';
   };
-  const dayKor = (iso) => ['일', '월', '화', '수', '목', '금', '토'][new Date(iso).getDay()];
+  const dayKor = (iso) => {
+    const d = parseDateLocal(iso);
+    return d ? ['일', '월', '화', '수', '목', '금', '토'][d.getDay()] : '';
+  };
+  const daysBetween = (fromISO, toISO) => {
+    const from = parseDateLocal(fromISO);
+    const to = parseDateLocal(toISO);
+    if (!from || !to) return null;
+    return Math.round((to - from) / 86400000);
+  };
+  const inkLifeInfo = (lot, baseDate) => {
+    if (!lot || !baseDate) return { text: '-', tone: 'empty', title: '' };
+    const age = daysBetween(lot.registeredDate, baseDate);
+    if (age === null) return { text: '-', tone: 'empty', title: '' };
+    const remaining = 4 - age;
+    if (remaining >= 0) {
+      return {
+        text: `${remaining}일 남음`,
+        tone: remaining <= 1 ? 'warn' : 'ok',
+        title: `LOT 날짜 ${fmtDate(lot.registeredDate)} 기준 · 유효기간 4일`,
+      };
+    }
+    const overdue = Math.abs(remaining);
+    return {
+      text: `${overdue}일 지남`,
+      tone: overdue <= 2 ? 'relabel' : 'expired',
+      title: overdue <= 2
+        ? `LOT 날짜 ${fmtDate(lot.registeredDate)} 기준 · 재라벨 검토 가능`
+        : `LOT 날짜 ${fmtDate(lot.registeredDate)} 기준 · 유효기간 초과`,
+    };
+  };
 
   // ── 기록된 일자 & 현재 일자 ──────────────────────────────────────────────
   const recordedDates = useMemo(() => Object.keys(inv.daily).sort(), [inv.daily]);
@@ -134,6 +166,25 @@ function InventoryPage({ ctx }) {
 
   const isCurrent = (iso) => iso === currentDate;
 
+  // 재고 조사 진입 시 오늘 일자 컬럼 자동 생성.
+  // 버튼은 남겨두되, 초보 사용자가 매일 눌러야 하는 흐름은 없앤다.
+  useEffect(() => {
+    if (!data.inventory) return;
+    if (inv.daily[today] || autoCreatedTodayRef.current) return;
+    autoCreatedTodayRef.current = true;
+    setData({
+      ...data,
+      inventory: {
+        ...inv,
+        daily: {
+          ...inv.daily,
+          [today]: {},
+        },
+      },
+    });
+    notify(`${fmtDate(today)} (${dayKor(today)}) 일자가 자동 생성됨`);
+  }, [data.inventory, today]);
+
   // ── Lot prefix 자동 매칭 ─────────────────────────────────────────────────
   const matchInk = (lotNo) => {
     if (!lotNo) return null;
@@ -148,13 +199,33 @@ function InventoryPage({ ctx }) {
     return null;
   };
 
-  // ── 표시할 lot 필터 ───────────────────────────────────────────────────────
+  const orderedInitialLots = useMemo(() => {
+    const initials = (inv.lots || []).filter(l => l.role !== 'relabel' && !l.parentId);
+    const byId = new Map(initials.map(l => [l.id, l]));
+    const ordered = [];
+    for (const id of (inv.order || [])) {
+      const lot = byId.get(id);
+      if (lot) {
+        ordered.push(lot);
+        byId.delete(id);
+      }
+    }
+    const rest = Array.from(byId.values()).sort((a, b) =>
+      (a.ink || '').localeCompare(b.ink || '') ||
+      (a.registeredDate || '').localeCompare(b.registeredDate || '') ||
+      (a.lotNo || '').localeCompare(b.lotNo || '')
+    );
+    return [...ordered, ...rest];
+  }, [inv.lots, inv.order]);
+
+  // ── 표시할 최초 lot 필터 ──────────────────────────────────────────────────
   const visibleLots = useMemo(() => {
-    let lots = inv.lots.slice();
+    let lots = orderedInitialLots;
     if (d2) {
       lots = lots.filter(lot => {
         if (lot.registeredDate > d2) return true;
-        const v = (inv.daily[d2] || {})[lot.id];
+        const actual = DataService.actualInventoryLotForInitial(inv.lots, lot, d2);
+        const v = (inv.daily[d2] || {})[actual?.id];
         return v !== 0;
       });
     }
@@ -166,23 +237,30 @@ function InventoryPage({ ctx }) {
       );
     }
     return lots;
-  }, [inv.lots, inv.daily, d2, search]);
+  }, [orderedInitialLots, inv.lots, inv.daily, d2, search]);
 
-  // ── 잉크별 그룹화 ────────────────────────────────────────────────────────
-  const inkGroups = useMemo(() => {
-    const map = new Map();
-    for (const lot of visibleLots) {
-      if (!map.has(lot.ink)) map.set(lot.ink, []);
-      map.get(lot.ink).push(lot);
+  const moveRow = (lotId, delta) => {
+    const current = orderedInitialLots.map(l => l.id);
+    const idx = current.indexOf(lotId);
+    const nextIdx = idx + delta;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= current.length) return;
+    const next = [...current];
+    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    setData({ ...data, inventory: { ...inv, order: next } });
+  };
+
+  const appendOrderForNewInitial = (currentInv, lot) => {
+    const current = orderedInitialLots.map(l => l.id).filter(id => id !== lot.id);
+    let insertAt = current.length;
+    for (let i = current.length - 1; i >= 0; i--) {
+      const existing = (currentInv.lots || []).find(l => l.id === current[i]);
+      if (existing?.ink === lot.ink) {
+        insertAt = i + 1;
+        break;
+      }
     }
-    for (const lots of map.values()) lots.sort((a, b) => a.order - b.order);
-    const entries = Array.from(map.entries());
-    entries.sort((a, b) => {
-      const cmp = a[0].localeCompare(b[0]);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return entries;
-  }, [visibleLots, sortDir]);
+    return [...current.slice(0, insertAt), lot.id, ...current.slice(insertAt)];
+  };
 
   // ── Lot 등록 ─────────────────────────────────────────────────────────────
   const registerLot = (lotNo, currentInv) => {
@@ -191,10 +269,10 @@ function InventoryPage({ ctx }) {
     const ink = matchInk(ln);
     if (!ink) return { ok: false, reason: 'no-ink', lotNo: ln };
     if (currentInv.lots.some(l => l.lotNo === ln)) return { ok: false, reason: 'dup', lotNo: ln };
-    const order = currentInv.lots.filter(l => l.ink === ink).length + 1;
+    const lotDate = DataService.dateFromLotNo(ln, today);
     const lot = {
       id: `L${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      ink, lotNo: ln, registeredDate: today, order,
+      ink, lotNo: ln, registeredDate: lotDate, order: 1, role: 'initial',
     };
     return { ok: true, lot };
   };
@@ -206,15 +284,17 @@ function InventoryPage({ ctx }) {
       else if (result.reason === 'dup') notify(`Lot '${result.lotNo}' 는 이미 등록되어 있습니다`);
       return;
     }
-    setData({ ...data, inventory: { ...inv, lots: [...inv.lots, result.lot] } });
-    notify(`${result.lot.ink} · ${result.lot.lotNo} 등록 (${result.lot.order}차)`);
+    const nextInv = { ...inv, lots: [...inv.lots, result.lot] };
+    nextInv.order = appendOrderForNewInitial(nextInv, result.lot);
+    setData({ ...data, inventory: nextInv });
+    notify(`${result.lot.ink} · ${result.lot.lotNo} 신규 생산 LOT 등록`);
     setNewLot('');
     setTimeout(() => newLotRef.current?.focus(), 0);
   };
 
-  const startAddLot = (ink) => {
-    setAddingFor(ink);
-    setAddingLotNo(ink.toUpperCase().slice(0, 4));
+  const startAddLot = (initialLot) => {
+    setAddingFor(initialLot.id);
+    setAddingLotNo(DataService.nextInventoryLotNo(initialLot.ink, today, inv.lots));
     setTimeout(() => {
       addingRef.current?.focus();
       const el = addingRef.current;
@@ -224,18 +304,34 @@ function InventoryPage({ ctx }) {
   const cancelAddLot = () => { setAddingFor(null); setAddingLotNo(''); };
   const confirmAddLot = () => {
     if (!addingFor) return;
+    const initialLot = inv.lots.find(l => l.id === addingFor);
+    if (!initialLot) return;
     const matched = matchInk(addingLotNo);
-    if (matched !== addingFor) {
-      notify(`'${addingLotNo}' 는 ${addingFor} 의 Lot 이 아닙니다 (prefix 불일치)`);
+    if (matched !== initialLot.ink) {
+      notify(`'${addingLotNo}' 는 ${initialLot.ink} 의 Lot 이 아닙니다 (prefix 불일치)`);
       return;
     }
-    const result = registerLot(addingLotNo, inv);
-    if (!result.ok) {
-      if (result.reason === 'dup') notify(`Lot '${result.lotNo}' 는 이미 등록되어 있습니다`);
+    if (inv.lots.some(l => l.lotNo === addingLotNo.toUpperCase().trim())) {
+      notify(`Lot '${addingLotNo}' 는 이미 등록되어 있습니다`);
       return;
     }
-    setData({ ...data, inventory: { ...inv, lots: [...inv.lots, result.lot] } });
-    notify(`${result.lot.ink} · ${result.lot.lotNo} 등록 (${result.lot.order}차)`);
+    const relabels = DataService.relabelLotsForInitial(inv.lots, initialLot);
+    if (relabels.length >= 2) {
+      notify(`${initialLot.lotNo} 는 3차 LOT까지 생성되어 있습니다`);
+      return;
+    }
+    const order = relabels.some(l => Number(l.order) === 2) ? 3 : 2;
+    const lot = {
+      id: `L${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ink: initialLot.ink,
+      lotNo: addingLotNo.toUpperCase().trim(),
+      registeredDate: DataService.dateFromLotNo(addingLotNo, today),
+      order,
+      role: 'relabel',
+      parentId: initialLot.id,
+    };
+    setData({ ...data, inventory: { ...inv, lots: [...inv.lots, lot] } });
+    notify(`${initialLot.lotNo} 재라벨 등록: ${lot.lotNo}`);
     cancelAddLot();
   };
 
@@ -243,10 +339,16 @@ function InventoryPage({ ctx }) {
     const lines = bulkText.split(/[\r\n\t]+/).map(s => s.trim()).filter(Boolean);
     const added = [];
     const failed = [];
-    let working = { ...inv, lots: [...inv.lots] };
+    let working = { ...inv, lots: [...inv.lots], order: orderedInitialLots.map(l => l.id) };
     for (const ln of lines) {
       const r = registerLot(ln, working);
-      if (r.ok) { working.lots.push(r.lot); added.push(r.lot); }
+      if (r.ok) {
+        working.lots.push(r.lot);
+        const sameInkIdx = working.order.map(id => working.lots.find(l => l.id === id)).reduce((last, l, i) => l?.ink === r.lot.ink ? i : last, -1);
+        const insertAt = sameInkIdx >= 0 ? sameInkIdx + 1 : working.order.length;
+        working.order = [...working.order.slice(0, insertAt), r.lot.id, ...working.order.slice(insertAt)];
+        added.push(r.lot);
+      }
       else failed.push({ lotNo: ln, reason: r.reason });
     }
     if (added.length > 0) setData({ ...data, inventory: working });
@@ -268,6 +370,32 @@ function InventoryPage({ ctx }) {
       newDaily[dateISO] = { ...(newDaily[dateISO] || {}), [lotId]: v };
     }
     setData({ ...data, inventory: { ...inv, daily: newDaily } });
+  };
+
+  const deleteLot = (lot) => {
+    if (!lot) return;
+    if (!confirm(`${lot.ink} · ${lot.lotNo} 를 삭제할까요? 입력된 재고도 함께 삭제됩니다.`)) return;
+    setData({ ...data, inventory: DataService.removeInventoryLot(inv, lot.id) });
+    notify(`${lot.ink} · ${lot.lotNo} 삭제됨`);
+  };
+
+  const deleteInk = (ink) => {
+    if (!confirm(`${ink} 재고 조사 행을 삭제할까요? 최초/재라벨 LOT와 입력된 재고가 모두 삭제됩니다.`)) return;
+    setData({ ...data, inventory: DataService.removeInventoryInk(inv, ink) });
+    notify(`${ink} 삭제됨`);
+  };
+
+  const relabelInk = (initialLot) => {
+    const relabels = DataService.relabelLotsForInitial(inv.lots, initialLot);
+    if (relabels.length >= 2) {
+      notify(`${initialLot.lotNo} 는 3차 LOT까지 생성되어 있습니다`);
+      return;
+    }
+    const nextInv = DataService.relabelInventoryLot(inv, initialLot.id, today);
+    if (nextInv === inv) return;
+    const created = nextInv.lots[nextInv.lots.length - 1];
+    setData({ ...data, inventory: nextInv });
+    notify(`${initialLot.lotNo} 재라벨: ${created.lotNo}`);
   };
 
   const focusNextInCol = (input) => {
@@ -302,9 +430,9 @@ function InventoryPage({ ctx }) {
 
   // ── 통계 / 미리보기 ──────────────────────────────────────────────────────
   const previewInk = newLot.trim() ? matchInk(newLot) : null;
-  const previewOrder = previewInk ? inv.lots.filter(l => l.ink === previewInk).length + 1 : null;
+  const previewOrder = previewInk ? DataService.lotSequenceForDate(inv.lots, previewInk, today) : null;
   const currentCount = currentDate ? Object.keys(inv.daily[currentDate] || {}).length : 0;
-  const orderLabel = (n) => n === 1 ? '최초' : `${n}차`;
+  const orderLabel = (n) => `${String(n).padStart(2, '0')}회차`;
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -313,11 +441,18 @@ function InventoryPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">잉크 재고 조사</div>
-            <div className="page__meta">
-              {currentDate
-                ? <>마지막 기록일 {currentDate} ({dayKor(currentDate)}) · 잉크 {inkGroups.length} / Lot {visibleLots.length} / 입력 {currentCount}</>
-                : <>아직 기록된 일자가 없습니다. 우측 [이어서 생성] 버튼으로 시작하세요.</>}
-            </div>
+            {currentDate ? (
+              <div className="page__meta-chips">
+                <span className="page__meta-chip page__meta-chip--today">
+                  마지막 기록 {fmtDate(currentDate)} ({dayKor(currentDate)})
+                </span>
+                <span className="page__meta-chip">행 <strong>{visibleLots.length}</strong></span>
+                <span className="page__meta-chip">Lot <strong>{visibleLots.length}</strong></span>
+                <span className="page__meta-chip">오늘 입력 <strong>{currentCount}</strong></span>
+              </div>
+            ) : (
+              <div className="page__meta">오늘 일자가 자동 생성됩니다. 필요하면 우측 [이어서 생성] 버튼으로 다시 확인하세요.</div>
+            )}
           </div>
           <div className="page__actions">
             <button className="btn btn--sm" onClick={() => setBulkOpen(true)}>
@@ -363,9 +498,7 @@ function InventoryPage({ ctx }) {
               onChange={e => setSearch(e.target.value)}
               style={{ minWidth: 200 }}
             />
-            <button className="btn btn--sm" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-              A→Z {sortDir === 'asc' ? '↓' : '↑'}
-            </button>
+            <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>행 순서는 ↑↓ 버튼으로 조정</span>
           </div>
 
           <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 280px)' }}>
@@ -377,7 +510,11 @@ function InventoryPage({ ctx }) {
                   <th style={{
                     width: 140, background: BG.lotMainHdr,
                     color: 'oklch(0.25 0.10 200)', fontWeight: 800,
-                  }}>최초 Lot</th>
+                  }}>실제 LOT</th>
+                  <th style={{
+                    width: 96, background: BG.lotMainHdr,
+                    color: 'oklch(0.25 0.10 200)', fontWeight: 800,
+                  }}>유효기간</th>
                   {visibleDates.map(dateISO => (
                     <th
                       key={dateISO}
@@ -398,130 +535,86 @@ function InventoryPage({ ctx }) {
                       ← [이어서 생성] 으로 일자 시작
                     </th>
                   )}
-                  <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>2차 Lot</th>
-                  <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>3차 Lot</th>
-                  <th className="no-print" style={{ width: 90, background: BG.num }}></th>
+                  <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>2차 LOT</th>
+                  <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>3차 LOT</th>
+                  <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>최초 LOT</th>
+                  <th className="no-print" style={{ width: 130, background: BG.num }}></th>
                 </tr>
               </thead>
               <tbody>
-                {inkGroups.map(([ink, lots], gi) => {
-                  const lot1 = lots[0], lot2 = lots[1], lot3 = lots[2];
+                {visibleLots.map((initialLot, gi) => {
+                  const relabels = DataService.relabelLotsForInitial(inv.lots, initialLot);
+                  const actualLot = currentDate ? DataService.actualInventoryLotForInitial(inv.lots, initialLot, currentDate) : initialLot;
+                  const life = inkLifeInfo(actualLot, currentDate || today);
+                  const lot2 = relabels.find(l => Number(l.order) === 2);
+                  const lot3 = relabels.find(l => Number(l.order) === 3);
                   const rowAlt = gi % 2 === 1;
                   const rowBg = rowAlt ? 'oklch(0.985 0.003 250)' : null;
                   return (
-                    <React.Fragment key={ink}>
+                    <React.Fragment key={initialLot.id}>
                       <tr style={{ height: 40, background: rowBg }}>
-                        <td className="row-num" style={{ background: BG.num, color: 'var(--ink-600)' }}>
+                        <td className="row-num" style={{ background: BG.num }}>
                           {gi + 1}
                         </td>
-                        <td className="ink-name" style={{
-                          fontWeight: 800,
-                          fontSize: 15,
-                          color: 'oklch(0.18 0.012 250)',
-                          letterSpacing: '0.01em',
-                          textAlign: 'center',
-                          borderRight: '2px solid var(--ink-300)',
-                        }}>
-                          {ink}
-                          {lots.length > 1 && (
-                            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--ink-500)', fontWeight: 500 }}>
-                              ({lots.length})
-                            </span>
-                          )}
-                        </td>
-                        {/* 최초 Lot (왼쪽, 강조) */}
+                        <td className="inv-ink ink-name">{initialLot.ink}</td>
+                        {/* 실제 LOT = 3차 > 2차 > 최초 */}
                         <td
-                          className="lot-no"
-                          style={{
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: lot1 ? 'oklch(0.30 0.12 200)' : 'var(--ink-300)',
-                            background: BG.lotMain,
-                            textAlign: 'center',
-                            borderRight: '2px solid oklch(0.75 0.10 200)',
-                          }}
-                          title={lot1 ? `등록일 ${fmtDate(lot1.registeredDate)}` : ''}
+                          className={`inv-lot-main lot-no ${actualLot ? '' : 'inv-lot-empty'}`}
+                          style={{ background: BG.lotMain, color: actualLot ? 'oklch(0.30 0.12 200)' : undefined }}
+                          title={actualLot ? `실제 LOT: ${actualLot.lotNo}` : ''}
                         >
-                          {lot1 ? lot1.lotNo : <span style={{ fontStyle: 'italic' }}>-</span>}
+                          {actualLot ? actualLot.lotNo : '-'}
+                        </td>
+                        <td
+                          className={`inv-life inv-life--${life.tone}`}
+                          style={{ background: BG.lotMain }}
+                          title={life.title}
+                        >
+                          {life.text}
                         </td>
                         {/* 일자 셀들 */}
                         {visibleDates.map(dateISO => {
                           const editable = isCurrent(dateISO);
-                          const stocks = lots.map(l => ({ lot: l, v: (inv.daily[dateISO] || {})[l.id] }));
+                          const actualForDate = DataService.actualInventoryLotForInitial(inv.lots, initialLot, dateISO);
+                          const dateLots = actualForDate ? [actualForDate] : [];
+                          const stocks = dateLots.map(l => ({ lot: l, v: (inv.daily[dateISO] || {})[l.id] }));
                           const sum = stocks.reduce((s, x) => s + (Number(x.v) || 0), 0);
                           const hasAny = stocks.some(x => x.v !== undefined);
                           return (
                             <td
                               key={dateISO}
-                              className="stock-cell num"
-                              style={{
-                                background: editable ? BG.today : BG.date,
-                                verticalAlign: 'top',
-                                padding: '4px 6px',
-                                borderLeft: '1px solid oklch(0.82 0.04 90)',
-                              }}
+                              className="stock-cell num inv-stock"
+                              style={{ background: editable ? BG.today : BG.date }}
                             >
                               {stocks.map(({ lot, v }, si) => {
-                                const showLabel = lots.length > 1;
+                                const showLabel = dateLots.length > 1;
                                 if (editable) {
                                   return (
-                                    <div
-                                      key={lot.id}
-                                      style={{
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        gap: 4, marginBottom: si < stocks.length - 1 ? 2 : 0,
-                                      }}
-                                    >
-                                      {showLabel && (
-                                        <span style={{ fontSize: 9, color: 'var(--ink-500)', fontWeight: 600 }}>
-                                          {lot.order}
-                                        </span>
-                                      )}
+                                    <div key={lot.id} className="inv-stock__row">
+                                      {showLabel && <span className="inv-lot-badge">{lot.order}</span>}
                                       <input
-                                        className="input"
+                                        className="inv-stock-input"
                                         type="number"
                                         min="0"
                                         value={v === undefined ? '' : v}
                                         onChange={e => setStock(lot.id, dateISO, e.target.value)}
                                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); focusNextInCol(e.currentTarget); } }}
-                                        style={{
-                                          width: 56, textAlign: 'center', padding: '2px 6px',
-                                          fontSize: 13, fontWeight: 600,
-                                        }}
                                       />
                                     </div>
                                   );
                                 }
+                                const displayClass = v === undefined
+                                  ? 'inv-stock__display--empty'
+                                  : v === 0 ? 'inv-stock__display--zero' : 'inv-stock__display--has';
                                 return (
-                                  <div
-                                    key={lot.id}
-                                    style={{
-                                      fontSize: 13, textAlign: 'center',
-                                      color: v === undefined ? 'var(--ink-400)' : v === 0 ? 'var(--bad-600)' : 'var(--ink-800)',
-                                      fontWeight: v === undefined ? 'normal' : 600,
-                                      lineHeight: 1.4,
-                                    }}
-                                  >
-                                    {showLabel && (
-                                      <span style={{ fontSize: 9, color: 'var(--ink-500)', fontWeight: 600, marginRight: 4 }}>
-                                        {lot.order}
-                                      </span>
-                                    )}
-                                    {v === undefined ? '-' : v}
+                                  <div key={lot.id} className={`inv-stock__row inv-stock__display ${displayClass}`}>
+                                    {showLabel && <span className="inv-lot-badge">{lot.order}</span>}
+                                    <span>{v === undefined ? '-' : v}</span>
                                   </div>
                                 );
                               })}
-                              {lots.length > 1 && hasAny && (
-                                <div style={{
-                                  borderTop: '1px solid var(--ink-300)',
-                                  marginTop: 3, paddingTop: 2,
-                                  textAlign: 'center',
-                                  fontWeight: 700, fontSize: 13,
-                                  color: 'var(--brand-700)',
-                                }}>
-                                  {sum}
-                                </div>
+                              {dateLots.length > 1 && hasAny && (
+                                <div className="inv-stock__sum">{sum}</div>
                               )}
                             </td>
                           );
@@ -531,58 +624,98 @@ function InventoryPage({ ctx }) {
                             일자 컬럼 없음
                           </td>
                         )}
-                        {/* 2차/3차 Lot (오른쪽 끝) */}
+                        {/* 2차/3차 LOT 변경값 */}
                         <td
-                          className="col-lot-extra lot-no"
-                          style={{
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: 12,
-                            color: lot2 ? 'var(--ink-800)' : 'var(--ink-300)',
-                            background: BG.lotExtra,
-                            textAlign: 'center',
-                          }}
+                          className={`col-lot-extra inv-lot-extra lot-no ${lot2 ? '' : 'inv-lot-empty'}`}
+                          style={{ background: BG.lotExtra }}
                           title={lot2 ? `등록일 ${fmtDate(lot2.registeredDate)}` : ''}
                         >
-                          {lot2 ? lot2.lotNo : <span style={{ fontStyle: 'italic' }}>-</span>}
+                          {lot2 ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {lot2.lotNo}
+                              <button
+                                className="btn btn--sm no-print"
+                                onClick={() => deleteLot(lot2)}
+                                title="2차 LOT 삭제"
+                                style={{ padding: '1px 4px' }}
+                              >
+                                <Icon name="trash" size={10} />
+                              </button>
+                            </span>
+                          ) : '-'}
                         </td>
                         <td
-                          className="col-lot-extra lot-no"
-                          style={{
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: 12,
-                            color: lot3 ? 'var(--ink-800)' : 'var(--ink-300)',
-                            background: BG.lotExtra,
-                            textAlign: 'center',
-                          }}
+                          className={`col-lot-extra inv-lot-extra lot-no ${lot3 ? '' : 'inv-lot-empty'}`}
+                          style={{ background: BG.lotExtra }}
                           title={lot3 ? `등록일 ${fmtDate(lot3.registeredDate)}` : ''}
                         >
-                          {lot3 ? lot3.lotNo : <span style={{ fontStyle: 'italic' }}>-</span>}
+                          {lot3 ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {lot3.lotNo}
+                              <button
+                                className="btn btn--sm no-print"
+                                onClick={() => deleteLot(lot3)}
+                                title="3차 LOT 삭제"
+                                style={{ padding: '1px 4px' }}
+                              >
+                                <Icon name="trash" size={10} />
+                              </button>
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td
+                          className={`col-lot-extra inv-lot-extra lot-no ${initialLot ? '' : 'inv-lot-empty'}`}
+                          style={{ background: BG.lotExtra }}
+                          title={initialLot ? `최초 LOT: ${initialLot.lotNo}` : ''}
+                        >
+                          {initialLot ? initialLot.lotNo : '-'}
                         </td>
                         {/* 액션 */}
                         <td className="no-print" style={{ textAlign: 'center', background: BG.num, borderLeft: '2px solid var(--ink-200)' }}>
-                          {lots.length < 3 ? (
+                          <div style={{ display: 'inline-flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
                             <button
                               className="btn btn--sm"
-                              onClick={() => startAddLot(ink)}
-                              title={`${ink} 새 Lot 추가`}
+                              onClick={() => relabelInk(initialLot)}
+                              title={`${initialLot.lotNo} 를 당일 LOT로 재라벨`}
+                              style={{ padding: '2px 8px', fontSize: 11 }}
+                              disabled={relabels.length >= 2 || !initialLot}
+                            >
+                              재라벨
+                            </button>
+                            <button
+                              className="btn btn--sm btn--danger"
+                              onClick={() => deleteLot(initialLot)}
+                              title={`${initialLot.lotNo} 재고 조사 행 삭제`}
                               style={{ padding: '2px 8px', fontSize: 11 }}
                             >
-                              <Icon name="plus" size={10} /> Lot
+                              삭제
                             </button>
-                          ) : (
-                            <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>최대</span>
-                          )}
+                            <button
+                              className="btn btn--sm"
+                              onClick={() => moveRow(initialLot.id, -1)}
+                              disabled={gi === 0}
+                              title="위로 이동"
+                              style={{ padding: '2px 6px', fontSize: 11 }}
+                            >↑</button>
+                            <button
+                              className="btn btn--sm"
+                              onClick={() => moveRow(initialLot.id, 1)}
+                              disabled={gi === visibleLots.length - 1}
+                              title="아래로 이동"
+                              style={{ padding: '2px 6px', fontSize: 11 }}
+                            >↓</button>
+                          </div>
                         </td>
                       </tr>
 
                       {/* Lot 변경 inline 입력 행 */}
-                      {addingFor === ink && (
+                      {addingFor === initialLot.id && (
                         <tr className="no-print" style={{ background: 'var(--info-100)' }}>
                           <td></td>
                           <td style={{ color: 'var(--info-600)', fontWeight: 700, fontSize: 12 }}>
-                            ↳ {ink} 에 {orderLabel(lots.length + 1)} Lot 추가
+                            ↳ {initialLot.lotNo} 재라벨 {orderLabel(relabels.length + 2)}
                           </td>
-                          <td colSpan={1 + visibleDates.length + (visibleDates.length === 0 ? 1 : 0)}>
+                          <td colSpan={2 + visibleDates.length + (visibleDates.length === 0 ? 1 : 0) + 1}>
                             <input
                               ref={addingRef}
                               className="input"
@@ -592,7 +725,7 @@ function InventoryPage({ ctx }) {
                                 if (e.key === 'Enter') { e.preventDefault(); confirmAddLot(); }
                                 if (e.key === 'Escape') cancelAddLot();
                               }}
-                              placeholder={`${ink.toUpperCase().slice(0, 4)}YYMMDD`}
+                              placeholder={`${initialLot.ink.toUpperCase().slice(0, 4)}MMDD02`}
                               style={{
                                 width: '100%', maxWidth: 220,
                                 fontFamily: 'JetBrains Mono, monospace',
@@ -625,7 +758,7 @@ function InventoryPage({ ctx }) {
                       ? (previewInk || '매칭 잉크 없음')
                       : <span style={{ fontStyle: 'italic', fontWeight: 400, fontSize: 13 }}>(자동 매칭)</span>}
                   </td>
-                  <td colSpan={1 + Math.max(visibleDates.length, 1) + 2}>
+                  <td colSpan={2 + Math.max(visibleDates.length, 1) + 3}>
                     <input
                       ref={newLotRef}
                       className="input"
@@ -641,7 +774,7 @@ function InventoryPage({ ctx }) {
                     />
                     {previewInk && previewOrder !== null && (
                       <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--brand-700)' }}>
-                        → {previewInk}의 {orderLabel(previewOrder)} Lot
+                        → {previewInk} 신규 생산 LOT
                       </span>
                     )}
                     {newLot.trim() && !previewInk && (
@@ -661,8 +794,8 @@ function InventoryPage({ ctx }) {
                   </td>
                 </tr>
 
-                {inkGroups.length === 0 && (
-                  <tr><td colSpan={3 + Math.max(visibleDates.length, 1) + 3} className="muted" style={{ textAlign: 'center', padding: 40 }}>
+                {visibleLots.length === 0 && (
+                  <tr><td colSpan={4 + Math.max(visibleDates.length, 1) + 4} className="muted" style={{ textAlign: 'center', padding: 40 }}>
                     {inv.lots.length === 0 ? '등록된 Lot 이 없습니다. 아래 행에서 Lot No 를 입력해 추가하세요.' : '조건에 맞는 Lot 이 없습니다'}
                   </td></tr>
                 )}

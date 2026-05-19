@@ -3,7 +3,7 @@
 function TestInksPage({ ctx }) {
   const { data, setData, notify } = ctx;
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('양산대응');
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [quickAdd, setQuickAdd] = useState({ name: '', brand: '', targetProduct: '', status: '내부검증', note: '' });
@@ -72,8 +72,13 @@ function TestInksPage({ ctx }) {
       <div className="page__head">
         <div className="page__title-row">
           <div>
-            <div className="page__title">양산대응 잉크 (테스트 중)</div>
-            <div className="page__meta">시양산·내부검증 중인 잉크를 별도 관리 · 생산계획에는 <strong>테스트 중</strong>으로만 표시되며 수량 기입 불가</div>
+            <div className="page__title">양산대응 잉크</div>
+            <div className="page__meta-chips">
+              <span className="page__meta-chip">전체 <strong>{list.length}</strong>종</span>
+              <span className="page__meta-chip page__meta-chip--today">양산대응 <strong>{counts.양산대응}</strong></span>
+              <span className="page__meta-chip page__meta-chip--warn">시양산 <strong>{counts.시양산}</strong></span>
+              <span className="page__meta-chip">내부검증 <strong>{counts.내부검증}</strong></span>
+            </div>
           </div>
           <div className="page__actions">
             <button className="btn"><Icon name="download" /> 내보내기</button>
@@ -82,27 +87,6 @@ function TestInksPage({ ctx }) {
       </div>
 
       <div className="page__body">
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-          <div className="kpi" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__label">전체 테스트 잉크</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{list.length}<span className="kpi__unit">종</span></div>
-          </div>
-          <div className="kpi kpi--ok" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__accent" />
-            <div className="kpi__label">양산대응</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.양산대응}</div>
-          </div>
-          <div className="kpi kpi--warn" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__accent" />
-            <div className="kpi__label">시양산</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.시양산}</div>
-          </div>
-          <div className="kpi" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__label">내부검증</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.내부검증}</div>
-          </div>
-        </div>
-
         <Card flush>
           <div className="toolbar">
             <input className="input input--search" placeholder="잉크명 · 대상 제품 · 브랜드 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
@@ -120,7 +104,7 @@ function TestInksPage({ ctx }) {
             <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filtered.length}건</span>
           </div>
 
-          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 380px)' }}>
+          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 240px)' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -167,7 +151,7 @@ function TestInksPage({ ctx }) {
                   <td>
                     <input className="input" placeholder="메모" value={quickAdd.note} onChange={e => setQuickAdd({ ...quickAdd, note: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }} style={{ width: '100%' }} />
                   </td>
-                  <td style={{ color: 'var(--ink-500)', fontSize: 11 }}>오늘 ({dayFromDate(new Date().toISOString().slice(0,10))})</td>
+                  <td style={{ color: 'var(--ink-500)', fontSize: 11 }}>오늘 ({dayFromDate(localDateISO())})</td>
                   <td style={{ textAlign: 'right' }}>
                     <button className="btn btn--primary btn--sm" onClick={handleQuickAdd} disabled={!quickAdd.name}><Icon name="plus" size={11} /> 추가</button>
                   </td>
@@ -219,7 +203,14 @@ function TestInksPage({ ctx }) {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40 }}>등록된 테스트 잉크가 없습니다</td></tr>
+                  <tr><td colSpan="100">
+                    <div className="empty-state">
+                      <div className="empty-state__title">
+                        {search || statusFilter !== 'all' ? '조건에 맞는 테스트 잉크 없음' : '등록된 테스트 잉크 없음'}
+                      </div>
+                      <div className="empty-state__hint">표 맨 위 행에서 신규 잉크명을 입력해 추가하세요.</div>
+                    </div>
+                  </td></tr>
                 )}
               </tbody>
             </table>

@@ -195,7 +195,8 @@ function OcrImportPage({ ctx }) {
       return;
     }
     setFile(f);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    // 이전 blob URL 해제는 위 useEffect([previewUrl]) cleanup이 담당.
+    // (paste 리스너가 []로 1회 등록되므로 여기서 previewUrl 을 직접 읽지 않음)
     setPreviewUrl(URL.createObjectURL(f));
     setResult(null);
     setError('');
@@ -215,7 +216,7 @@ function OcrImportPage({ ctx }) {
   useEffect(() => {
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  });
+  }, []);
 
   const run = async () => {
     if (!apiKey) {
@@ -269,47 +270,45 @@ function OcrImportPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">INK 요청서 입력</div>
-            <div className="page__meta">현장 스캔 이미지 → Gemini Vision으로 자동 파싱 · 검수 후 사출계획에 반영</div>
+            <div className="page__meta-chips">
+              <span className={`page__meta-chip ${apiKey ? 'page__meta-chip--today' : 'page__meta-chip--warn'}`}>
+                {apiKey ? '✓ API 연결됨' : '⚠ API 키 필요'}
+              </span>
+              <span className="page__meta-chip">{geminiModel || 'gemini-2.5-flash'}</span>
+              <span className="page__meta-chip">현장 스캔 → Gemini Vision → 검수</span>
+            </div>
           </div>
           <div className="page__actions">
-            <Pill tone={apiKey ? 'ok' : 'warn'}>{apiKey ? 'API 연결됨' : 'API 키 없음'}</Pill>
-            <button className="btn" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); setError(''); setStatus('idle'); }}>
-              <Icon name="refresh" /> 새로 시작
-            </button>
+            {file && (
+              <button className="btn" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); setError(''); setStatus('idle'); }}>
+                <Icon name="refresh" /> 새로 시작
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="page__body">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+        <div className="ocr-grid">
 
           {/* 좌측: 업로드 + 이미지 미리보기 */}
           <Card title="원본 이미지">
             {!file && (
               <div
+                className="ocr-dropzone"
                 onDrop={onDrop}
                 onDragOver={(e) => e.preventDefault()}
                 onClick={() => inputRef.current?.click()}
-                style={{
-                  border: '2px dashed var(--ink-300)',
-                  borderRadius: 12,
-                  padding: '40px 20px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: 'var(--ink-50)',
-                  transition: 'all .12s',
-                }}
-                onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--brand-500)'; e.currentTarget.style.background = 'var(--brand-50)'; }}
-                onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--ink-300)'; e.currentTarget.style.background = 'var(--ink-50)'; }}
               >
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: 'var(--ink-500)' }}>
+                <div className="ocr-dropzone__icon">
                   <Icon name="image" size={32} />
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink-800)', marginBottom: 4 }}>
+                <div className="ocr-dropzone__title">
                   이미지를 드롭하거나 클릭해서 선택
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>
-                  PNG · JPG · WEBP · 페이지에서 Ctrl+V로 붙여넣기도 가능
+                <div className="ocr-dropzone__hint">
+                  PNG · JPG · WEBP<br />
+                  페이지에서 Ctrl+V로 붙여넣기도 가능
                 </div>
                 <input
                   ref={inputRef}
@@ -323,29 +322,26 @@ function OcrImportPage({ ctx }) {
 
             {file && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--ink-600)' }}>
+                <div className="ocr-file-bar">
                   <Icon name="image" size={14} />
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
-                  <span style={{ color: 'var(--ink-500)' }}>{(file.size / 1024).toFixed(1)} KB</span>
-                  <button className="btn" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); }} title="제거">
+                  <span className="ocr-file-bar__name">{file.name}</span>
+                  <span className="ocr-file-bar__size">{(file.size / 1024).toFixed(1)} KB</span>
+                  <button className="btn btn--sm btn--ghost" onClick={() => { setFile(null); setPreviewUrl(''); setResult(null); }} title="제거">
                     <Icon name="x" size={12} />
                   </button>
                 </div>
-                <div style={{ background: 'var(--ink-50)', borderRadius: 8, padding: 8, maxHeight: 'calc(100vh - 320px)', overflow: 'auto' }}>
-                  <img src={previewUrl} alt="원본" style={{ width: '100%', borderRadius: 4, display: 'block' }} />
+                <div className="ocr-preview">
+                  <img src={previewUrl} alt="원본" />
                 </div>
-                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                  <button
-                    className="btn btn--primary"
-                    onClick={run}
-                    disabled={status === 'parsing'}
-                    style={{ flex: 1 }}
-                  >
-                    {status === 'parsing'
-                      ? <><Icon name="refresh" size={12} /> 파싱 중...</>
-                      : <><Icon name="sparkle" size={12} /> Gemini로 파싱</>}
-                  </button>
-                </div>
+                <button
+                  className="btn btn--primary ocr-run-btn"
+                  onClick={run}
+                  disabled={status === 'parsing'}
+                >
+                  {status === 'parsing'
+                    ? <><Icon name="refresh" size={12} /> 파싱 중...</>
+                    : <><Icon name="sparkle" size={12} /> Gemini로 파싱</>}
+                </button>
               </>
             )}
           </Card>
@@ -353,31 +349,37 @@ function OcrImportPage({ ctx }) {
           {/* 우측: 파싱 결과 */}
           <Card
             title="파싱 결과"
-            actions={result && <button className="btn" onClick={() => setShowRaw(s => !s)}><Icon name="settings" size={12} /> {showRaw ? '표 보기' : 'Raw JSON'}</button>}
+            actions={result && <button className="btn btn--sm" onClick={() => setShowRaw(s => !s)}><Icon name="settings" size={12} /> {showRaw ? '표 보기' : 'Raw JSON'}</button>}
           >
             {status === 'idle' && !file && (
-              <EmptyState text="이미지를 업로드하면 결과가 여기에 표시됩니다." />
+              <div className="empty-state">
+                <div className="empty-state__title">아직 이미지 없음</div>
+                <div className="empty-state__hint">좌측에 이미지를 업로드하면 여기에 파싱 결과가 표시됩니다.</div>
+              </div>
             )}
             {status === 'idle' && file && (
-              <EmptyState text="좌측에서 [Gemini로 파싱] 버튼을 눌러 시작하세요." />
+              <div className="empty-state">
+                <div className="empty-state__title">파싱 대기</div>
+                <div className="empty-state__hint">좌측의 [Gemini로 파싱] 버튼을 눌러 시작하세요.</div>
+              </div>
             )}
             {status === 'parsing' && (
-              <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <div className="ocr-status">
                 <div className="spinner" />
-                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--ink-600)' }}>
-                  이미지 분석 중... <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--brand-700)', fontWeight: 600 }}>{elapsed.toFixed(1)}s</span>
+                <div className="ocr-status__time">
+                  이미지 분석 중... <strong>{elapsed.toFixed(1)}s</strong>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-500)' }}>
+                <div className="ocr-status__substep">
                   이미지 압축 → Gemini 호출 → 응답 파싱
                 </div>
               </div>
             )}
             {status === 'error' && (
-              <div style={{ padding: 16, background: 'var(--bad-50)', border: '1px solid var(--bad-300)', borderRadius: 8, color: 'var(--bad-700)' }}>
-                <div style={{ fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="ocr-error">
+                <div className="ocr-error__title">
                   <Icon name="x" size={14} /> 오류
                 </div>
-                <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</div>
+                <div className="ocr-error__detail">{error}</div>
               </div>
             )}
             {status === 'done' && result && (

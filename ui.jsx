@@ -33,6 +33,7 @@ const Icon = ({ name, size = 16 }) => {
     beaker: <><path d="M9 3h6v5l4 9a2 2 0 0 1-1.8 2.8H6.8A2 2 0 0 1 5 16.9L9 8V3z"/><path d="M8 3h8"/><path d="M7 12h10"/></>,
     lock: <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
     flask: <><path d="M10 2v6L5 18a2 2 0 0 0 1.8 2.8h10.4A2 2 0 0 0 19 18l-5-10V2"/><path d="M8 2h8"/></>,
+    history: <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
@@ -87,8 +88,7 @@ const Seg = ({ value, onChange, options }) => (
   </div>
 );
 
-// ── Product name matching (OCR → master) ────────────────────────────────────
-// IRMS의 product_matcher.py를 JS로 포팅. normalize → exact → token Jaccard.
+// ── Product name normalization (OCR ↔ master 비교용) ─────────────────────────
 
 function normalizeProductName(name) {
   if (!name) return '';
@@ -97,21 +97,6 @@ function normalizeProductName(name) {
   s = s.replace(/[_\-\s/\\()（）\[\]【】·・.,，]+/g, '');
   s = s.replace(/[^\w가-힣%]/g, '');
   return s;
-}
-
-function tokenizeProductName(name) {
-  if (!name) return new Set();
-  const s = String(name).trim().toUpperCase();
-  // 영문 연속, 한글 연속, 숫자(소수점 포함)
-  const tokens = s.match(/[A-Z]+|[가-힣]+|\d+(?:\.\d+)?/g) || [];
-  return new Set(tokens.filter(t => t.length >= 2 || /^\d/.test(t)));
-}
-
-function tokenJaccard(a, b) {
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const t of a) if (b.has(t)) inter++;
-  return inter / (a.size + b.size - inter);
 }
 
 // ── 공통 상수 ───────────────────────────────────────
@@ -130,9 +115,8 @@ function padInks3(arr) {
 
 // 한국어 요일을 ISO 날짜에서 자동 계산 ('월'~'일'). 잘못된 입력 시 default 반환.
 function dayFromDate(iso, fallback = '월') {
-  if (!iso) return fallback;
-  const d = new Date(iso);
-  if (isNaN(d)) return fallback;
+  const d = parseDateLocal(iso);
+  if (!d) return fallback;
   return ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
 }
 
@@ -167,76 +151,26 @@ function getWeekInfo(now = new Date()) {
   const nextMon = new Date(monday);
   nextMon.setDate(monday.getDate() + 7);
   dates['차주월'] = `${nextMon.getMonth() + 1}/${nextMon.getDate()}`;
-  return { today: todayName, dates };
+
+  // ISO 8601 주차 (그 주 목요일이 속한 해 기준)
+  const thursday = new Date(monday);
+  thursday.setDate(monday.getDate() + 3);
+  const isoYear = thursday.getFullYear();
+  const yearStart = new Date(isoYear, 0, 1);
+  const isoWeek = Math.ceil(((thursday - yearStart) / 86400000 + 1) / 7);
+  const isoLabel = `${isoYear}-W${String(isoWeek).padStart(2, '0')}`;
+
+  // "n월 n주차" — 그 주 월요일이 그 달의 몇 번째 월요일인지
+  const weekOfMonth = Math.floor((monday.getDate() - 1) / 7) + 1;
+  const monthWeekLabel = `${monday.getMonth() + 1}월 ${weekOfMonth}주차`;
+
+  return { today: todayName, dates, isoLabel, monthWeekLabel };
 }
 
 // OCR brand "PIA / 액상" → "PIA" 같이 정규화 (슬래시 앞부분만, 대문자)
 function normalizeBrand(brand) {
   if (!brand) return '';
   return String(brand).split('/')[0].trim().toUpperCase();
-}
-
-// products: [{ name, brand, inks }] 객체 배열
-// ocrBrand: OCR이 추출한 브랜드 (선택)
-// returns { matchedName, confidence, status, candidates[{name, brand, score, brandMatch}] }
-//   status: 'exact' | 'fuzzy' | 'none'
-//   같은 브랜드 후보가 우선 정렬됨. 브랜드 일치 시 점수 가산, 불일치 시 페널티.
-function matchProduct(ocrName, ocrBrand, products, { threshold = 0.25, topN = 5 } = {}) {
-  const result = { ocrName, ocrBrand, matchedName: null, confidence: 0, status: 'none', candidates: [] };
-  const normOcr = normalizeProductName(ocrName);
-  if (!normOcr) return result;
-
-  const normOcrBrand = normalizeBrand(ocrBrand);
-
-  // 호환성: products가 string[] 으로 들어오면 [{name}] 으로 변환
-  const items = products.map(p => typeof p === 'string' ? { name: p, brand: '' } : p);
-
-  // Pass 1: exact normalized match — 정확 이름 일치 시, 같은 브랜드가 있으면 그걸 우선
-  const exactMatches = items.filter(p => normalizeProductName(p.name) === normOcr);
-  if (exactMatches.length > 0) {
-    const sameBrand = normOcrBrand
-      ? exactMatches.find(p => normalizeBrand(p.brand) === normOcrBrand)
-      : null;
-    const picked = sameBrand || exactMatches[0];
-    result.matchedName = picked.name;
-    result.confidence = 1;
-    result.status = 'exact';
-    return result;
-  }
-
-  // Pass 2: token Jaccard + 브랜드 가중
-  const ocrTokens = tokenizeProductName(ocrName);
-  const scored = [];
-  for (const p of items) {
-    const tokens = tokenizeProductName(p.name);
-    let base = tokenJaccard(ocrTokens, tokens);
-    const brandMatch = !!(normOcrBrand && p.brand && normalizeBrand(p.brand) === normOcrBrand);
-    const brandKnown = !!(normOcrBrand && p.brand);
-    let score = base;
-    if (brandMatch) score = Math.min(1, base + 0.15);          // 같은 브랜드 가산
-    else if (brandKnown) score = base * 0.6;                    // 다른 브랜드 페널티
-    if (score >= threshold) {
-      scored.push({
-        name: p.name,
-        brand: p.brand || '',
-        score: Math.round(score * 1000) / 1000,
-        brandMatch,
-      });
-    }
-  }
-  // 같은 브랜드 우선 → 점수 내림차순
-  scored.sort((a, b) => {
-    if (a.brandMatch !== b.brandMatch) return a.brandMatch ? -1 : 1;
-    return b.score - a.score;
-  });
-
-  if (scored.length > 0) {
-    result.matchedName = scored[0].name;
-    result.confidence = scored[0].score;
-    result.status = 'fuzzy';
-    result.candidates = scored.slice(0, topN);
-  }
-  return result;
 }
 
 // CascadePicker — 브랜드 → 제품 (→ 선택적으로 잉크) 단계별 선택

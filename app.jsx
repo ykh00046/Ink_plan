@@ -10,8 +10,12 @@ function migrateData(raw) {
   const products = raw.products || [];
   let nextProducts;
   // 이미 신구조(inks 배열)면 길이 3 정규화만
+  // inkMachines 필드 제거 — 호기 정보는 machineAssignments(잉크→호기)로 일원화
   if (products.length === 0 || products[0].inks !== undefined) {
-    nextProducts = products.map(p => ({ ...p, inks: padInks3(p.inks) }));
+    nextProducts = products.map(p => {
+      const { inkMachines, ...rest } = p;
+      return { ...rest, inks: padInks3(p.inks) };
+    });
   } else {
     // 구조 변환: 같은 name row를 합쳐 1·2·3도 순서로 inks 채움
     const map = new Map();
@@ -33,31 +37,33 @@ function migrateData(raw) {
       inks: padInks3(e._inks),
     }));
   }
-  // machineAssignments: { ink, machine } 단일 형태로 정규화 (구버전 product/name 흡수)
+  // machineAssignments: { ink, machine, code } 단일 형태로 정규화 (구버전 product/name 흡수)
   const nextAssignments = (raw.machineAssignments || []).map(a => ({
     ink: a.ink || a.product || a.name || '',
     machine: a.machine || '',
+    code: a.code || '',
   })).filter(a => a.ink);
   return { ...raw, products: nextProducts, machineAssignments: nextAssignments };
 }
 
+// 일일 워크플로우 순서로 구성:
+//   재고 조사 → INK 요청서 → 검수 → 사출계획 → 잉크 생산계획 → 층별 공급
 const NAV = [
-  { group: '생산 계획', items: [
-    { id: 'ocr-import', label: 'INK 요청서 입력', icon: 'upload' },
-    { id: 'review', label: '제품명 검수', icon: 'sparkle' },
-    { id: 'injection', label: '사출계획', icon: 'injection' },
-    { id: 'ink-plan', label: '잉크 생산계획', icon: 'ink' },
+  { group: '일일 작업', items: [
+    { id: 'inventory',  step: '1', label: '재고 조사',       icon: 'flask' },
+    { id: 'ocr-import', step: '2', label: 'INK 요청서 입력', icon: 'upload' },
+    { id: 'review',     step: '3', label: '미등록 제품 확인', icon: 'sparkle' },
+    { id: 'injection',  step: '4', label: '사출계획',        icon: 'injection' },
+    { id: 'ink-plan',   step: '5', label: '잉크 생산계획',   icon: 'ink' },
+    { id: 'history',    label: '기록 조회', icon: 'history' },
   ]},
-  { group: '잉크 관리', items: [
-    { id: 'inventory', label: '재고 조사', icon: 'flask' },
-    { id: 'ink-add', label: '넣어줄 잉크', icon: 'add' },
-    { id: 'floor3', label: '3층', icon: 'floor' },
-    { id: 'floor1', label: '1층', icon: 'floor' },
-    { id: 'test-inks', label: '양산대응 (테스트)', icon: 'beaker' },
+  { group: '현장 공급', items: [
+    { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add' },
+    { id: 'test-inks', label: '양산대응',     icon: 'beaker' },
   ]},
   { group: '마스터', items: [
-    { id: 'products', label: '제품 추가', icon: 'plus' },
-    { id: 'machines', label: '잉크 추가', icon: 'beaker' },
+    { id: 'machines', label: '잉크 추가 및 관리', icon: 'beaker' },
+    { id: 'products', label: '제품 추가 및 관리', icon: 'plus' },
   ]},
 ];
 
@@ -69,6 +75,9 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "showRowNum": true
 }/*EDITMODE-END*/;
 
+// 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
+const APP_REV = 41;
+
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
   indigo: ['oklch(0.27 0.10 285)', 'oklch(0.42 0.14 285)', 'oklch(0.55 0.17 285)', 'oklch(0.95 0.030 285)'],
@@ -78,23 +87,16 @@ const ACCENT_PRESETS = {
 
 function App() {
   const [data, setData] = useState(null);
-  const [view, setView] = useState('injection');
+  const [view, setView] = useState('inventory');
   const [tweaks, setTweaks] = useTweaks(TWEAK_DEFAULTS);
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [apiKey, setApiKey] = useState(() => {
-    try {
-      localStorage.removeItem('geminiApiKey');
-      return sessionStorage.getItem('geminiApiKey') || '';
-    } catch (e) { return ''; }
-  });
-  const [geminiModel, setGeminiModel] = useState(() => {
-    try { return localStorage.getItem('geminiModel') || 'gemini-2.5-flash'; } catch (e) { return 'gemini-2.5-flash'; }
-  });
+  const [apiKey, setApiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
   const [ocrResult, setOcrResult] = useState(null); // {parsed, sourceImage(blob url), parsedAt} - 검수 페이지로 전달
   const toastTimer = useRef(null);
 
-  // 초기 로드: localStorage 있으면 그 데이터, 없으면 clean.json fetch
+  // 초기 로드: 파일 DB API 우선, 실패하면 localStorage/clean.json fallback
   useEffect(() => {
     const safeMigrate = (raw, source) => {
       try {
@@ -105,49 +107,102 @@ function App() {
       }
     };
 
-    try {
-      const saved = localStorage.getItem('inkPlanData');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const migrated = safeMigrate(parsed, 'localStorage');
-        if (migrated) {
-          setData(migrated);
-          console.log('[init] localStorage에서 로드:', Object.keys(migrated).length, '키');
-          return;
+    const loadFallback = () => {
+      try {
+        const saved = localStorage.getItem('inkPlanData');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const migrated = safeMigrate(parsed, 'localStorage');
+          if (migrated) {
+            setData(migrated);
+            console.log('[init] localStorage에서 로드:', Object.keys(migrated).length, '키');
+            return;
+          }
         }
+      } catch (e) {
+        console.error('[init] localStorage 파싱 실패:', e);
       }
-    } catch (e) {
-      console.error('[init] localStorage 파싱 실패:', e);
-    }
 
-    fetch('data/clean.json')
+      fetch('data/clean.json')
+        .then(r => {
+          if (!r.ok) throw new Error(`fetch ${r.status}`);
+          return r.json();
+        })
+        .then(raw => {
+          const migrated = safeMigrate(raw, 'clean.json');
+          setData(migrated);
+          console.log('[init] clean.json에서 로드');
+        })
+        .catch(e => {
+          console.error('[init] clean.json 로드 실패:', e);
+          setData({ products: [], inkPlan: [], inkAdd: [], injection: { '3층': [], '1층': [] }, testInks: [], machineAssignments: [] });
+        });
+    };
+    fetch('/api/db', { cache: 'no-store' })
       .then(r => {
-        if (!r.ok) throw new Error(`fetch ${r.status}`);
+        if (!r.ok) throw new Error(`api ${r.status}`);
         return r.json();
       })
       .then(raw => {
-        const migrated = safeMigrate(raw, 'clean.json');
+        const migrated = safeMigrate(raw, 'file-db');
         setData(migrated);
-        console.log('[init] clean.json에서 로드');
+        console.log('[init] file DB에서 로드');
       })
       .catch(e => {
-        console.error('[init] clean.json 로드 실패:', e);
-        // 데이터 못 받아도 빈 상태로라도 화면 띄움
-        setData({ products: [], inkPlan: [], inkAdd: [], injection: { '3층': [], '1층': [] }, testInks: [], machineAssignments: [] });
+        console.warn('[init] file DB 로드 실패, fallback 사용:', e);
+        loadFallback();
       });
   }, []);
 
   // data가 바뀔 때마다 자동 저장 (debounce 가볍게)
   const saveTimer = useRef(null);
+  const saveQueue = useRef(Promise.resolve());
   useEffect(() => {
     if (!data) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try { localStorage.setItem('inkPlanData', JSON.stringify(data)); }
-      catch (e) { console.warn('localStorage 저장 실패:', e); }
+      const snapshot = data;
+      saveQueue.current = saveQueue.current
+        .catch(() => {})
+        .then(async () => {
+          const r = await fetch('/api/db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(snapshot),
+          });
+          if (!r.ok) {
+            let detail = '';
+            try { detail = await r.text(); } catch (e) {}
+            throw new Error(`file DB ${r.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+          }
+        })
+        .catch(e => {
+          console.warn('file DB 저장 실패, localStorage fallback:', e);
+          try { localStorage.setItem('inkPlanData', JSON.stringify(snapshot)); }
+          catch (err) { console.warn('localStorage 저장 실패:', err); }
+          notify('파일 저장 실패 - 브라우저 임시 저장소에 보관됨');
+        });
     }, 300);
     return () => clearTimeout(saveTimer.current);
   }, [data]);
+
+  useEffect(() => {
+    fetch('/api/settings', { cache: 'no-store' })
+      .then(r => {
+        if (!r.ok) throw new Error(`settings ${r.status}`);
+        return r.json();
+      })
+      .then(settings => {
+        setApiKey(settings.apiKey || '');
+        setGeminiModel(settings.model || 'gemini-2.5-flash');
+        try {
+          localStorage.removeItem('geminiApiKey');
+          sessionStorage.removeItem('geminiApiKey');
+          localStorage.removeItem('geminiModel');
+        } catch (e) {}
+      })
+      .catch(e => console.warn('설정 로드 실패:', e));
+  }, []);
 
   // Apply tweaks: theme and density via data attributes
   useEffect(() => {
@@ -173,19 +228,30 @@ function App() {
   }
 
   const navItem = NAV.flatMap(g => g.items).find(i => i.id === view);
-  const saveApiKey = (key) => {
-    setApiKey(key);
-    try {
-      if (key) sessionStorage.setItem('geminiApiKey', key);
-      else sessionStorage.removeItem('geminiApiKey');
-      localStorage.removeItem('geminiApiKey');
-    } catch (e) { /* private mode */ }
+  const saveSettings = (key, m) => {
+    const nextKey = key.trim();
+    const nextModel = m || 'gemini-2.5-flash';
+    setApiKey(nextKey);
+    setGeminiModel(nextModel);
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: nextKey, model: nextModel }),
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`settings ${r.status}`);
+        return r.json();
+      })
+      .then(settings => {
+        setApiKey(settings.apiKey || '');
+        setGeminiModel(settings.model || nextModel);
+      })
+      .catch(e => {
+        console.warn('설정 저장 실패:', e);
+        notify('설정 저장 실패');
+      });
   };
-  const saveModel = (m) => {
-    setGeminiModel(m);
-    try { localStorage.setItem('geminiModel', m); } catch (e) {}
-  };
-  const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveApiKey, geminiModel, saveModel, ocrResult, setOcrResult, setView, today: weekInfo.today, dates: weekInfo.dates };
+  const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveSettings, geminiModel, ocrResult, setOcrResult, setView, today: weekInfo.today, dates: weekInfo.dates };
 
   return (
     <div className="app">
@@ -202,8 +268,8 @@ function App() {
           <span className="crumb-active">{navItem ? navItem.label : ''}</span>
         </nav>
         <div className="app__toolbar">
-          <div className="app__chip"><span className="dot" /><span>주차: 2025-W20</span></div>
-          <div className="app__chip">Rev. 41</div>
+          <div className="app__chip"><span className="dot" /><span>주차: {weekInfo.isoLabel}</span></div>
+          <div className="app__chip">Rev. {APP_REV}</div>
           <button
             className="app__chip"
             title="브라우저 저장된 데이터를 비우고 clean.json으로 되돌리기 (현재 변경사항 모두 사라짐)"
@@ -238,11 +304,11 @@ function App() {
                 className={`sb-item ${view === item.id ? 'active' : ''}`}
                 onClick={() => setView(item.id)}
               >
-                <span className="sb-item__icon"><Icon name={item.icon} /></span>
+                {item.step
+                  ? <span className="sb-item__step">{item.step}</span>
+                  : <span className="sb-item__icon"><Icon name={item.icon} /></span>}
                 <span>{item.label}</span>
-                {item.id === 'injection' && <span className="sb-item__badge">{data.injection['3층'].length + data.injection['1층'].length}</span>}
-                {item.id === 'ink-add' && <span className="sb-item__badge">{data.inkAdd.length}</span>}
-                {item.id === 'products' && <span className="sb-item__badge">{data.products.length}</span>}
+                {item.id === 'products' && <span className="sb-item__badge">{data.products?.length || 0}</span>}
                 {item.id === 'test-inks' && <span className="sb-item__badge" style={{background:'oklch(0.95 0.05 30)',color:'oklch(0.50 0.16 30)'}}>{data.testInks?.length || 0}</span>}
               </div>
             ))}
@@ -250,7 +316,7 @@ function App() {
         ))}
         <div className="sb-footer">
           <div>김선명 · 생산관리팀</div>
-          <div style={{ marginTop: 4, opacity: 0.7 }}>5월 2주차 · v41</div>
+          <div style={{ marginTop: 4, opacity: 0.7 }}>{weekInfo.monthWeekLabel} · v{APP_REV}</div>
         </div>
       </aside>
 
@@ -259,9 +325,8 @@ function App() {
         {view === 'review' && <ReviewPage ctx={ctx} />}
         {view === 'injection' && <InjectionPage ctx={ctx} />}
         {view === 'ink-plan' && <InkPlanPage ctx={ctx} />}
+        {view === 'history' && <HistoryPage ctx={ctx} />}
         {view === 'ink-add' && <InkAddPage ctx={ctx} />}
-        {view === 'floor3' && <FloorPage ctx={ctx} floor="3" />}
-        {view === 'floor1' && <FloorPage ctx={ctx} floor="1" />}
         {view === 'products' && <ProductsPage ctx={ctx} />}
         {view === 'machines' && <MachinesPage ctx={ctx} />}
         {view === 'test-inks' && <TestInksPage ctx={ctx} />}
@@ -274,9 +339,10 @@ function App() {
         <SettingsModal
           apiKey={apiKey}
           model={geminiModel}
+          setData={setData}
+          notify={notify}
           onSave={(key, m) => {
-            saveApiKey(key);
-            if (m !== geminiModel) saveModel(m);
+            saveSettings(key, m);
             notify(key ? '설정 저장됨' : 'API 키 삭제됨');
           }}
           onClose={() => setShowSettings(false)}
@@ -295,7 +361,7 @@ const GEMINI_MODELS = [
   { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', meta: 'RPM 15 · RPD 500 · 한도 최대' },
 ];
 
-function SettingsModal({ apiKey, model, onSave, onClose }) {
+function SettingsModal({ apiKey, model, setData, notify, onSave, onClose }) {
   const [key, setKey] = useState(apiKey);
   const [m, setM] = useState(model);
   const [show, setShow] = useState(false);
@@ -318,7 +384,7 @@ function SettingsModal({ apiKey, model, onSave, onClose }) {
           <button
             className="btn btn--primary"
             onClick={() => { onSave(key.trim(), m); onClose(); }}
-            disabled={!key.trim() || !dirty}
+            disabled={!dirty}
           ><Icon name="check" size={12} /> 저장</button>
         </>
       }
@@ -344,7 +410,7 @@ function SettingsModal({ apiKey, model, onSave, onClose }) {
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: 'var(--brand-700)' }}>
             aistudio.google.com/apikey
           </a>
-          {' · '}현재 탭 세션에만 저장됨. 브라우저를 닫으면 삭제됩니다.
+          {' · '}처음 한 번 저장하면 이 PC에서 계속 기억됩니다.
         </div>
       </div>
 
@@ -359,7 +425,79 @@ function SettingsModal({ apiKey, model, onSave, onClose }) {
       <div style={{ marginTop: 16, padding: 10, background: 'var(--ink-50)', borderRadius: 8, fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.6 }}>
         매일 1장이면 2.5 Flash로 충분, 여러 장/재시도 많으면 <strong>3.1 Flash Lite (500 RPD)</strong> 추천.
       </div>
+
+      <BackupControls setData={setData} notify={notify} />
     </Modal>
+  );
+}
+
+function BackupControls({ setData, notify }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    fetch('/api/backups', { cache: 'no-store' })
+      .then(r => {
+        if (!r.ok) throw new Error(`backup ${r.status}`);
+        return r.json();
+      })
+      .then(setItems)
+      .catch(() => notify('백업 목록을 불러오지 못했습니다. start.vbs로 실행했는지 확인하세요.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const makeBackup = () => {
+    fetch('/api/backup', { method: 'POST' })
+      .then(r => {
+        if (!r.ok) throw new Error(`backup ${r.status}`);
+        return r.json();
+      })
+      .then(j => { notify(`백업 생성: ${j.name}`); load(); })
+      .catch(() => notify('백업 생성 실패'));
+  };
+
+  const restore = (name) => {
+    if (!confirm(`${name} 백업으로 복원할까요? 현재 데이터는 복원 전 백업으로 먼저 보관됩니다.`)) return;
+    fetch('/api/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`restore ${r.status}`);
+        return fetch('/api/db', { cache: 'no-store' });
+      })
+      .then(r => r.json())
+      .then(d => { setData(migrateData(d)); notify('백업 복원 완료'); load(); })
+      .catch(() => notify('백업 복원 실패'));
+  };
+
+  return (
+    <div className="field" style={{ marginTop: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <label className="field__label" style={{ margin: 0 }}>데이터 백업</label>
+        <div className="spacer" />
+        <button className="btn btn--sm" onClick={load} disabled={loading}>새로고침</button>
+        <button className="btn btn--sm btn--primary" onClick={makeBackup}>지금 백업</button>
+      </div>
+      <div style={{ maxHeight: 150, overflow: 'auto', border: '1px solid var(--ink-200)', borderRadius: 8 }}>
+        {items.length === 0 && (
+          <div style={{ padding: 12, fontSize: 12, color: 'var(--ink-500)' }}>
+            백업 파일이 없습니다.
+          </div>
+        )}
+        {items.slice(0, 20).map(item => (
+          <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: '1px solid var(--ink-100)', fontSize: 12 }}>
+            <span style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace' }}>{item.name}</span>
+            <button className="btn btn--sm" onClick={() => restore(item.name)}>복원</button>
+          </div>
+        ))}
+      </div>
+      <div className="field__hint">자동 백업은 매일 18:30에 생성됩니다. 최근 백업 90개를 보관합니다.</div>
+    </div>
   );
 }
 

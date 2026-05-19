@@ -58,3 +58,15 @@ test('counts product references inside injection schedules', () => {
   assert.equal(DataService.countInjectionRefs(data, 'P1'), 3);
   assert.equal(DataService.countInjectionRefs(data, 'P3'), 0);
 });
+
+test('shows today and the next two days for three-day injection view', () => {
+  assert.deepEqual(
+    DataService.getVisibleWeekdays(['월', '화', '수', '목', '금'], '수', '3days'),
+    ['수', '목', '금']
+  );
+  assert.deepEqual(
+    DataService.getVisibleWeekdays(['월', '화', '수', '목', '금', '차주월'], '목', '3days'),
+    ['목', '금', '차주월']
+  );
+  assert.deepEqual(DataService.getVisibleWeekdays(['월', '화'], '월', 'all'), ['월', '화']);
+});
