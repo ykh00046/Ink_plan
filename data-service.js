@@ -86,6 +86,85 @@
     return count;
   }
 
+  // 약품요청서 집계: 사출계획 셀(호기×시프트×제품) → 잉크 → 품목코드/호기 매핑.
+  // 순수 함수, 데이터 변경 없음. data-service에 두는 이유는 inkAdd와 동일한 도메인 변환이기 때문.
+  // 반환: { rows: [{code, ink, machine, f3, f1, total, hasCode}], unmappedProducts: Set<string> }
+  //   - rows는 total desc 정렬
+  //   - 잉크에 코드/호기가 없어도 행은 포함됨 (hasCode=false)
+  //   - 잉크가 1개도 매핑 안 된 제품은 unmappedProducts 부산물로 알림
+  function aggregateChemicalRequest(data, opts) {
+    const o = opts || {};
+    const allDays = ['월','화','수','목','금','토','일','차주월'];
+    const days = (o.days && o.days.length) ? o.days : allDays;
+    const shifts = (o.shifts && o.shifts.length) ? o.shifts : ['day', 'night'];
+    const injection = data?.injection || {};
+    const floors = (o.floors && o.floors.length) ? o.floors : Object.keys(injection);
+
+    const dayFilter = new Set(days);
+    const shiftFilter = new Set(shifts);
+    const floorFilter = new Set(floors);
+
+    const productInks = new Map();
+    for (const p of (data?.products || [])) {
+      productInks.set(p.name, (p.inks || []).filter(Boolean));
+    }
+    const inkMeta = new Map();
+    for (const a of (data?.machineAssignments || [])) {
+      const ink = a.ink || a.product || a.name || '';
+      if (!ink || inkMeta.has(ink)) continue;
+      inkMeta.set(ink, { code: a.code || '', machine: a.machine || '' });
+    }
+
+    const rowMap = new Map();
+    const unmappedProducts = new Set();
+
+    for (const floor of Object.keys(injection)) {
+      if (!floorFilter.has(floor)) continue;
+      const isF3 = floor === '3층';
+      for (const machine of injection[floor] || []) {
+        const schedule = machine.schedule || {};
+        for (const day of Object.keys(schedule)) {
+          if (!dayFilter.has(day)) continue;
+          const cell = schedule[day] || {};
+          for (const shift of Object.keys(cell)) {
+            if (!shiftFilter.has(shift)) continue;
+            const product = cell[shift];
+            if (!product) continue;
+            const inks = productInks.get(product);
+            if (!inks || inks.length === 0) {
+              unmappedProducts.add(product);
+              continue;
+            }
+            for (const ink of inks) {
+              if (!rowMap.has(ink)) {
+                const meta = inkMeta.get(ink) || { code: '', machine: '' };
+                rowMap.set(ink, {
+                  code: meta.code,
+                  ink,
+                  machine: meta.machine,
+                  f3: 0,
+                  f1: 0,
+                  total: 0,
+                  hasCode: !!meta.code,
+                });
+              }
+              const row = rowMap.get(ink);
+              if (isF3) row.f3 += 1;
+              else row.f1 += 1;
+              row.total += 1;
+            }
+          }
+        }
+      }
+    }
+
+    const rows = Array.from(rowMap.values()).sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      return a.ink.localeCompare(b.ink);
+    });
+    return { rows, unmappedProducts };
+  }
+
   function localDateISO(now = new Date()) {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -114,6 +193,18 @@
     if (idx < 0) return today ? [today] : [];
     const end = Math.min(days.length - 1, idx + 2);
     return days.slice(idx, end + 1);
+  }
+
+  // 사출계획의 machine 객체에서 호기 번호 추출.
+  // injection 데이터는 { no: 순번, machine: '10호기', schedule: ... } 형태이므로
+  // OCR이 가져오는 r.machine_no(정수)와 매칭하려면 machine 문자열에서 첫 정수를 뽑아야 함.
+  function machineNoOf(machine) {
+    if (!machine) return null;
+    const direct = Number(machine.machineNo);
+    if (Number.isInteger(direct) && direct > 0) return direct;
+    const s = String(machine.machine || machine.name || '');
+    const m = s.match(/(\d+)/);
+    return m ? Number(m[1]) : null;
   }
 
   function updateMachineAssignment(assignments, inkName, machine) {
@@ -291,6 +382,8 @@
     parseDateLocal,
     getVisibleWeekdays,
     updateMachineAssignment,
+    machineNoOf,
+    aggregateChemicalRequest,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,

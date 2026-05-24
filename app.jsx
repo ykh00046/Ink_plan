@@ -59,6 +59,7 @@ const NAV = [
   ]},
   { group: '현장 공급', items: [
     { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add' },
+    { id: 'chemicals', label: '약품요청서',   icon: 'beaker' },
     { id: 'test-inks', label: '양산대응',     icon: 'beaker' },
   ]},
   { group: '마스터', items: [
@@ -76,7 +77,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 41;
+const APP_REV = 48;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -92,8 +93,9 @@ function App() {
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
-  const [ocrResult, setOcrResult] = useState(null); // {parsed, sourceImage(blob url), parsedAt} - 검수 페이지로 전달
+  const [geminiModel, setGeminiModel] = useState('gemini-3.1-flash-lite');
+  const [ocrResult, setOcrResult] = useState(null); // { parsed, sourceImageUrl(data URL), sourceFileName, parsedAt, model } - 검수 페이지로 전달
+  const [lastMergeInfo, setLastMergeInfo] = useState(null); // { days: ['수','목'], at: Date.now() } - 사출계획에서 자동 요일 확장 트리거
   const toastTimer = useRef(null);
 
   // 초기 로드: 파일 DB API 우선, 실패하면 localStorage/clean.json fallback
@@ -194,7 +196,7 @@ function App() {
       })
       .then(settings => {
         setApiKey(settings.apiKey || '');
-        setGeminiModel(settings.model || 'gemini-2.5-flash');
+        setGeminiModel(settings.model || 'gemini-3.1-flash-lite');
         try {
           localStorage.removeItem('geminiApiKey');
           sessionStorage.removeItem('geminiApiKey');
@@ -230,7 +232,7 @@ function App() {
   const navItem = NAV.flatMap(g => g.items).find(i => i.id === view);
   const saveSettings = (key, m) => {
     const nextKey = key.trim();
-    const nextModel = m || 'gemini-2.5-flash';
+    const nextModel = m || 'gemini-3.1-flash-lite';
     setApiKey(nextKey);
     setGeminiModel(nextModel);
     fetch('/api/settings', {
@@ -251,7 +253,7 @@ function App() {
         notify('설정 저장 실패');
       });
   };
-  const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveSettings, geminiModel, ocrResult, setOcrResult, setView, today: weekInfo.today, dates: weekInfo.dates };
+  const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveSettings, geminiModel, ocrResult, setOcrResult, lastMergeInfo, setLastMergeInfo, setView, today: weekInfo.today, dates: weekInfo.dates };
 
   return (
     <div className="app">
@@ -270,16 +272,6 @@ function App() {
         <div className="app__toolbar">
           <div className="app__chip"><span className="dot" /><span>주차: {weekInfo.isoLabel}</span></div>
           <div className="app__chip">Rev. {APP_REV}</div>
-          <button
-            className="app__chip"
-            title="브라우저 저장된 데이터를 비우고 clean.json으로 되돌리기 (현재 변경사항 모두 사라짐)"
-            onClick={() => {
-              if (confirm('저장된 모든 변경사항을 비우고 초기 데이터로 되돌릴까? 되돌릴 수 없어.')) {
-                try { localStorage.removeItem('inkPlanData'); } catch (e) {}
-                location.reload();
-              }
-            }}
-          ><Icon name="refresh" size={12} /> 초기화</button>
           <button className="app__chip" title="알림"><Icon name="bell" size={12} /></button>
           <button
             className="app__chip"
@@ -327,6 +319,7 @@ function App() {
         {view === 'ink-plan' && <InkPlanPage ctx={ctx} />}
         {view === 'history' && <HistoryPage ctx={ctx} />}
         {view === 'ink-add' && <InkAddPage ctx={ctx} />}
+        {view === 'chemicals' && <ChemicalsPage ctx={ctx} />}
         {view === 'products' && <ProductsPage ctx={ctx} />}
         {view === 'machines' && <MachinesPage ctx={ctx} />}
         {view === 'test-inks' && <TestInksPage ctx={ctx} />}
@@ -354,11 +347,14 @@ function App() {
   );
 }
 
+// 한도(RPD) 큰 순서대로 정렬. 일상 운영은 3.1 Flash Lite(500 RPD)가 안전.
+// 정확도가 더 필요한 어려운 표는 3.5 Flash / 3 Flash 시도 (RPD 20).
 const GEMINI_MODELS = [
+  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', meta: 'RPM 15 · RPD 500 · 한도 최대 (일상 권장)' },
+  { value: 'gemini-3.5-flash',      label: 'Gemini 3.5 Flash',      meta: 'RPM 5 · RPD 20 · 최신, 표 정확도 기대' },
+  { value: 'gemini-3-flash',        label: 'Gemini 3 Flash',        meta: 'RPM 5 · RPD 20 · 신형' },
   { value: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash',      meta: 'RPM 5 · RPD 20 · 정확도 검증됨' },
-  { value: 'gemini-3-flash',        label: 'Gemini 3 Flash',        meta: 'RPM 5 · RPD 20 · 신형(정확도↑ 기대)' },
   { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', meta: 'RPM 10 · RPD 20 · 빠름' },
-  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', meta: 'RPM 15 · RPD 500 · 한도 최대' },
 ];
 
 function SettingsModal({ apiKey, model, setData, notify, onSave, onClose }) {
@@ -423,7 +419,7 @@ function SettingsModal({ apiKey, model, setData, notify, onSave, onClose }) {
       </div>
 
       <div style={{ marginTop: 16, padding: 10, background: 'var(--ink-50)', borderRadius: 8, fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.6 }}>
-        매일 1장이면 2.5 Flash로 충분, 여러 장/재시도 많으면 <strong>3.1 Flash Lite (500 RPD)</strong> 추천.
+        일상 운영은 <strong>3.1 Flash Lite (RPD 500)</strong> 권장. 같은 이미지에서 표가 잘 안 잡히면 신형 <strong>3.5 Flash</strong> / <strong>3 Flash</strong> 로 재시도(각 RPD 20).
       </div>
 
       <BackupControls setData={setData} notify={notify} />

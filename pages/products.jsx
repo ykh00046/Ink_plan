@@ -25,11 +25,30 @@ function ProductsPage({ ctx }) {
     return Array.from(s).sort();
   }, [data.products]);
 
+  // 마스터에 알려진 잉크: machineAssignments(정본) + inkPlan + 기존 제품의 inks 합집합.
+  // 정규화 후 dedup하되 표시 이름은 첫 발견 원형 유지.
   const allInks = useMemo(() => {
+    const map = new Map();
+    const add = (raw) => {
+      if (!raw) return;
+      const norm = String(raw).trim().toLowerCase();
+      if (norm && !map.has(norm)) map.set(norm, raw);
+    };
+    for (const a of (data.machineAssignments || [])) add(inkOfAssignment(a));
+    for (const i of (data.inkPlan || [])) add(i.name);
+    for (const p of data.products) for (const ink of (p.inks || [])) add(ink);
+    return Array.from(map.values()).sort();
+  }, [data.products, data.machineAssignments, data.inkPlan]);
+
+  // 마스터에 없는 잉크인지 검사 (정규화 비교)
+  const knownInkSet = useMemo(() => {
     const s = new Set();
-    for (const p of data.products) for (const ink of (p.inks || [])) if (ink) s.add(ink);
-    return Array.from(s).sort();
-  }, [data.products]);
+    for (const v of allInks) s.add(String(v).trim().toLowerCase());
+    return s;
+  }, [allInks]);
+  const findUnknownInks = (inks) => (inks || [])
+    .filter(Boolean)
+    .filter(ink => !knownInkSet.has(String(ink).trim().toLowerCase()));
 
   const filtered = useMemo(() => {
     let list = data.products;
@@ -56,6 +75,11 @@ function ProductsPage({ ctx }) {
       notify('공장, 제품명, TYPE, 고객사, 잉크를 모두 입력해야 추가할 수 있습니다');
       return;
     }
+    const unknown = findUnknownInks(quickAdd.inks);
+    if (unknown.length) {
+      notify(`마스터에 없는 잉크: ${unknown.join(', ')} — 잉크 추가 및 관리에서 먼저 등록하세요`);
+      return;
+    }
     const newProduct = {
       factory: quickAdd.factory.trim(),
       name: quickAdd.name.trim(),
@@ -73,6 +97,11 @@ function ProductsPage({ ctx }) {
     const filledInks = (product.inks || []).filter(Boolean);
     if (!product.factory?.trim() || !product.name?.trim() || !product.type?.trim() || !product.brand?.trim() || filledInks.length === 0) {
       notify('공장, 제품명, TYPE, 고객사, 잉크를 모두 입력해야 저장할 수 있습니다');
+      return;
+    }
+    const unknown = findUnknownInks(filledInks);
+    if (unknown.length) {
+      notify(`마스터에 없는 잉크: ${unknown.join(', ')} — 잉크 추가 및 관리에서 먼저 등록하세요`);
       return;
     }
     const newData = { ...data };
@@ -343,9 +372,23 @@ function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factor
   );
 }
 
-// 단일 잉크 슬롯 입력 — text + datalist + X 버튼
+// 잉크명 정규화 (마스터 비교용) — 잉크 추가 페이지의 중복 검사와 동일 규칙
+function normalizeInkName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+// 단일 잉크 슬롯 입력 — text + datalist + X 버튼.
+// suggestions는 마스터의 알려진 잉크명. 미등록 입력이면 빨간 테두리 + 힌트로 표기.
 function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
   const datalistId = useMemo(() => `ink-dl-${Math.random().toString(36).slice(2, 8)}`, []);
+  const knownSet = useMemo(() => {
+    const s = new Set();
+    for (const v of suggestions) s.add(normalizeInkName(v));
+    return s;
+  }, [suggestions]);
+  const trimmed = (value || '').trim();
+  const isUnknown = trimmed.length > 0 && !knownSet.has(normalizeInkName(trimmed));
+
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
       <input
@@ -354,7 +397,12 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
         value={value || ''}
         onChange={e => onChange(e.target.value === '' ? null : e.target.value)}
         placeholder={placeholder}
-        style={{ width: '100%', paddingRight: value ? 24 : 8 }}
+        style={{
+          width: '100%',
+          paddingRight: value ? 24 : 8,
+          borderColor: isUnknown ? 'var(--bad-500)' : undefined,
+        }}
+        title={isUnknown ? '잉크 마스터에 없는 이름입니다. 잉크 추가 및 관리 페이지에서 먼저 등록하세요.' : undefined}
       />
       <datalist id={datalistId}>
         {suggestions.map(s => <option key={s} value={s} />)}
@@ -372,6 +420,11 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
           onMouseOver={e => e.currentTarget.style.color = 'var(--bad-600)'}
           onMouseOut={e => e.currentTarget.style.color = 'var(--ink-400)'}
         >×</button>
+      )}
+      {isUnknown && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, fontSize: 10, color: 'var(--bad-600)', marginTop: 2, lineHeight: 1.3 }}>
+          마스터 미등록
+        </div>
       )}
     </div>
   );

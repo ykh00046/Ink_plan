@@ -1716,10 +1716,22 @@ button { background: none; border: none; cursor: pointer; }
 }
 
 /* Print — 표 중심 인쇄 (넣어줄 잉크 등). inventory.jsx는 자체 print 스타일 별도 주입. */
+/* 약품요청서: 인쇄 전용 헤더(평소 숨김) */
+.chem-print-header { display: none; }
+
 @media print {
   @page { size: A4 portrait; margin: 12mm; }
   .app__sidebar, .app__header, .toolbar, .page__actions,
-  .floor-tabs, .twk-panel, .toast { display: none !important; }
+  .floor-tabs, .twk-panel, .toast, .chem-filter-bar { display: none !important; }
+  .chem-print-header {
+    display: block !important;
+    margin-bottom: 8mm;
+    border-bottom: 0.5pt solid #000;
+    padding-bottom: 4mm;
+  }
+  .chem-print-header h1 { font-size: 16pt; margin: 0 0 6pt; }
+  .chem-print-header .meta { font-size: 10pt; color: #333; line-height: 1.6; }
+  .chem-print-header .meta div { display: inline-block; margin-right: 14pt; }
   .app { display: block !important; height: auto !important; }
   .app__main { overflow: visible !important; }
   .page, .page__body { height: auto !important; padding: 0 !important; }

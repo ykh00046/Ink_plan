@@ -7,17 +7,31 @@ const GEMINI_ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta/m
 const OCR_SYSTEM_PROMPT = `당신은 콘택트렌즈 잉크 생산 문서 전문 OCR 파서입니다.
 이미지는 'INK 요청서'(상단 표)와 '약품요청서'(하단 표)로 구성됩니다.
 
-## INK 요청서 파싱 규칙
-1. 상단 큰 표에서 호기(10~59), 구분(브랜드), 제품명을 추출.
-2. 표 헤더에 표시된 두 날짜와 시프트(주간/야간/명일주간)별로 분리.
-   - 좌측 두 열(주간/야간) = 요청일 D, 우측 한 열(명일주간) = D+1
-3. 호기 번호는 행 좌측의 호기 열에 있음. 좌측의 3F/1F(층) 그룹도 함께 기록.
-4. 구분 컬럼은 브랜드 + 선택적으로 "/액상" 또는 "_M" 같은 하위 공정 구분이 붙음.
-   - brand는 IRIS, PIA, PIA_M, BELLA, ALCON, SOLEKO, From, Bella, TEST 등의 핵심 키워드.
-   - variant는 "액상", "M" 같은 하위 구분. 없으면 빈 문자열.
-5. 제품명은 원본 그대로 추출 (특수문자, 숫자, %, 언더스코어, 공백 모두 포함).
-6. 행 전체가 TEST이거나 제품명이 비어있으면 건너뛰지 말고 product_name="TEST" 그대로 기록.
-7. 빈 셀(브랜드도 제품명도 없음)은 그 row를 생략.
+## INK 요청서 표 구조 (중요)
+표는 좌→우로 다음과 같이 구성됩니다:
+- (A) 층 그룹: 3F / 1F (행 묶음 라벨)
+- (B) 호기 컬럼: 10~59 정수
+- (C) 시프트 컬럼 3개를 **가로로 나란히** 가짐:
+    1) 요청일 주간   (헤더에 표시된 첫 번째 날짜 D)
+    2) 요청일 야간   (헤더에 표시된 첫 번째 날짜 D)
+    3) 명일 주간     (헤더에 표시된 두 번째 날짜 D+1)
+- 각 시프트 컬럼은 (구분=brand) 와 (제품명) 두 개의 sub-column으로 다시 나뉩니다 (총 6개 셀).
+
+## 출력 규칙 (반드시 지킬 것)
+1. \`shifts\` 배열은 **정확히 3개 요소**: shift='주간', shift='야간', shift='명일주간' (이 순서).
+2. 각 시프트의 \`rows\`는 그 시프트 컬럼에 보이는 모든 호기 행을 담는다. **세 시프트 모두 같은 호기 목록을 가져야** 한다 (한 시프트만 채우고 다른 두 시프트를 비우는 일은 금지). 같은 호기의 주야명 값이 동일하더라도 세 row 모두 출력하라.
+3. 호기 번호는 행 좌측 호기 열에서 추출(정수). 층(3F/1F)도 함께.
+4. 구분(brand)·제품명은 **시프트 컬럼별로 따로** 추출.
+   - 같은 호기여도 시프트마다 다를 수 있다 (예: 호기 50: 주간=From/Clear Beige, 야간=Bella/BELLA_Ocean Blue).
+   - 한 시프트의 brand·제품명을 다른 시프트의 셀로 절대 전파하지 마.
+   - 통합셀(merged)이 표시되어 있어도 그 셀이 실제 차지하는 sub-column 안에서만 적용. 시프트 컬럼 경계를 절대 넘지 마.
+   - brand 셀이 진짜 비어 있으면 \`brand=""\` 로 둘 것 (이전 row의 brand 복제 금지).
+5. brand 핵심 키워드 후보: IRIS, PIA, PIA_M, BELLA, ALCON, SOLEKO, From, Bella, TEST 등.
+6. variant는 "/액상" 또는 "_M" 같은 하위 구분. 없으면 빈 문자열.
+7. 제품명은 원본 그대로(특수문자·숫자·%·_·공백 포함).
+8. 행 전체가 TEST(brand=TEST 이고 제품명=TEST)인 호기는 그 시프트의 row에도 \`brand="TEST", product_name="TEST"\` 그대로 기록. 누락 금지.
+9. **빈 셀 처리**: brand·제품명 모두 비어있는 시프트 셀은 그 시프트의 row만 생략 가능. 단 같은 호기의 다른 시프트가 채워져 있으면 그 시프트는 반드시 출력.
+10. \`request_date\` = 헤더 첫째 날짜(YYYY-MM-DD), \`next_date\` = 헤더 둘째 날짜(YYYY-MM-DD). 둘 다 필수.
 
 ## 약품요청서 파싱 규칙
 1. 하단 작은 표에서 약품명 코드, 농도(구분), 3F/1F 대수를 추출.
@@ -31,10 +45,13 @@ const OCR_SYSTEM_PROMPT = `당신은 콘택트렌즈 잉크 생산 문서 전문
 const OCR_RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    request_date: { type: 'string', description: '요청일 YYYY-MM-DD' },
-    next_date: { type: 'string', description: '명일 YYYY-MM-DD' },
+    request_date: { type: 'string', description: '요청일 YYYY-MM-DD (헤더 첫째 날짜)' },
+    next_date: { type: 'string', description: '명일 YYYY-MM-DD (헤더 둘째 날짜) — 반드시 채울 것' },
     shifts: {
       type: 'array',
+      minItems: 3,
+      maxItems: 3,
+      description: '정확히 3개 요소: 주간/야간/명일주간 순서. 각 시프트의 rows에는 그 시프트 컬럼에 보이는 모든 호기 행을 담아라.',
       items: {
         type: 'object',
         properties: {
@@ -46,7 +63,7 @@ const OCR_RESPONSE_SCHEMA = {
               properties: {
                 machine_no: { type: 'integer' },
                 floor: { type: 'string', description: '3F 또는 1F. 모르면 빈 문자열' },
-                brand: { type: 'string' },
+                brand: { type: 'string', description: '이 시프트 컬럼의 brand. 다른 시프트의 brand로 채우지 마.' },
                 variant: { type: 'string', description: '액상/M 등. 없으면 빈 문자열' },
                 product_name: { type: 'string' },
               },
@@ -72,7 +89,7 @@ const OCR_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ['request_date', 'shifts'],
+  required: ['request_date', 'next_date', 'shifts'],
 };
 
 // 이미지를 캔버스로 다운스케일 + JPEG 압축 → 토큰 절약·전송시간 단축
@@ -288,7 +305,7 @@ function OcrImportPage({ ctx }) {
               <span className={`page__meta-chip ${apiKey ? 'page__meta-chip--today' : 'page__meta-chip--warn'}`}>
                 {apiKey ? '✓ API 연결됨' : '⚠ API 키 필요'}
               </span>
-              <span className="page__meta-chip">{geminiModel || 'gemini-2.5-flash'}</span>
+              <span className="page__meta-chip">{geminiModel || 'gemini-3.1-flash-lite'}</span>
               <span className="page__meta-chip">현장 스캔 → Gemini Vision → 검수</span>
             </div>
           </div>

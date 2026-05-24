@@ -1,7 +1,7 @@
 // 사출계획 page - weekly machine schedule with drag-and-drop
 
 function InjectionPage({ ctx }) {
-  const { data, setData, notify, today, dates } = ctx;
+  const { data, setData, notify, today, dates, lastMergeInfo } = ctx;
   const [floor, setFloor] = useState('3층');
   const [search, setSearch] = useState('');
   const [dayFilter, setDayFilter] = useState('3days'); // 7days | 3days
@@ -15,6 +15,20 @@ function InjectionPage({ ctx }) {
   // 보이는 요일 (3일/7일)
   const visibleDays = useMemo(() => DataService.getVisibleWeekdays(days, today, dayFilter), [dayFilter, today]);
   const columns = useMemo(() => DataService.getInjectionColumns(visibleDays), [visibleDays]);
+
+  // OCR 머지 직후 — 머지된 요일이 현재 시야 밖이면 dayFilter를 'all'로 자동 확장.
+  // (오늘=금인데 OCR 요청일=수 같은 케이스에서 '입력 안 됨'으로 오해되지 않도록)
+  const handledMergeRef = useRef(null);
+  useEffect(() => {
+    if (!lastMergeInfo || handledMergeRef.current === lastMergeInfo.at) return;
+    handledMergeRef.current = lastMergeInfo.at;
+    const visible = DataService.getVisibleWeekdays(days, today, dayFilter);
+    const missing = (lastMergeInfo.days || []).filter(d => !visible.includes(d));
+    if (missing.length > 0) {
+      setDayFilter('all');
+      notify(`OCR 머지 결과 ${missing.join('·')}요일을 보려면 전체 요일로 펼쳤어`);
+    }
+  }, [lastMergeInfo]);
 
   // Test ink detection: value is a test ink name OR ANY of the product's inks is a test ink OR product is targetProduct of a test ink
   const testSets = useMemo(() => {

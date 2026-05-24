@@ -5,7 +5,7 @@ from storage import DATA_DIR, write_json_atomic
 
 
 SETTINGS_FILE = DATA_DIR / "settings.json"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 KEY_TARGET = "InkPlanGeminiApiKey"
 
 
