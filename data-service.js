@@ -165,6 +165,180 @@
     return { rows, unmappedProducts };
   }
 
+  // 마스터 정합성 검증 — 사출계획·제품·잉크 마스터 간 결함을 카테고리별로 산출.
+  // read-only, 부수효과 없음. 데이터 변경 없음.
+  // 정규화 함수는 옵션 인자로 주입 (브라우저에서는 ui.jsx의 normalizeProductName, 테스트에서는 생략 가능)
+  // 반환 구조는 docs/02-design/마스터-정합성.md 참고.
+  function lintMasters(data, opts) {
+    const o = opts || {};
+    const norm = typeof o.normalize === 'function'
+      ? o.normalize
+      : (s) => String(s || '').trim().toUpperCase();
+    const issues = [];
+
+    const products = (data && data.products) || [];
+    const assignments = (data && data.machineAssignments) || [];
+    const injection = (data && data.injection) || {};
+
+    // 1) 제품 마스터 인덱스: 원본 이름 → inks, 정규화 → 원본 이름
+    const productInks = new Map();          // name → inks[] (Boolean true 인 것만)
+    const normProductName = new Map();      // normalized → original name
+    for (const p of products) {
+      const name = String(p.name || '');
+      if (!name) continue;
+      const inks = (p.inks || []).filter(Boolean);
+      productInks.set(name, inks);
+      const n = norm(name);
+      if (n && !normProductName.has(n)) normProductName.set(n, name);
+      if (inks.length === 0) {
+        issues.push({
+          category: 'product-no-inks',
+          severity: 'error',
+          label: '제품에 잉크가 비어 있음',
+          target: name,
+          detail: p.brand ? `브랜드 ${p.brand}` : '',
+          navTo: 'products',
+          key: `product-no-inks:${name}`,
+        });
+      }
+    }
+
+    // 2) machineAssignments 인덱스
+    const inkAssignCount = new Map();       // ink → count
+    const inkAssignFirst = new Map();       // ink → { code, machine }
+    for (const a of assignments) {
+      const ink = String((a && (a.ink || a.product || a.name)) || '').trim();
+      if (!ink) continue;
+      inkAssignCount.set(ink, (inkAssignCount.get(ink) || 0) + 1);
+      if (!inkAssignFirst.has(ink)) {
+        inkAssignFirst.set(ink, { code: String(a.code || '').trim(), machine: String(a.machine || '').trim() });
+      }
+    }
+    for (const [ink, count] of inkAssignCount.entries()) {
+      if (count > 1) {
+        issues.push({
+          category: 'duplicate-ink-assignment',
+          severity: 'warn',
+          label: '잉크가 여러 호기에 중복 등록',
+          target: ink,
+          detail: `중복 ${count}건`,
+          navTo: 'machines',
+          key: `duplicate-ink-assignment:${ink}`,
+        });
+      }
+      const meta = inkAssignFirst.get(ink);
+      if (!meta.code) {
+        issues.push({
+          category: 'ink-no-code',
+          severity: 'warn',
+          label: '잉크 품목코드 미입력',
+          target: ink,
+          detail: meta.machine ? `호기 ${meta.machine}` : '',
+          navTo: 'machines',
+          key: `ink-no-code:${ink}`,
+        });
+      }
+      if (!meta.machine) {
+        issues.push({
+          category: 'ink-no-machine',
+          severity: 'warn',
+          label: '잉크 사용 호기 미지정',
+          target: ink,
+          detail: meta.code ? `코드 ${meta.code}` : '',
+          navTo: 'machines',
+          key: `ink-no-machine:${ink}`,
+        });
+      }
+    }
+
+    // 3) injection 셀에서 제품 마스터에 없는 항목
+    const reportedMissing = new Set();
+    for (const floor of Object.keys(injection)) {
+      const machines = injection[floor] || [];
+      for (const machine of machines) {
+        const schedule = machine.schedule || {};
+        for (const day of Object.keys(schedule)) {
+          const cell = schedule[day] || {};
+          for (const shift of Object.keys(cell)) {
+            const value = cell[shift];
+            if (!value) continue;
+            if (productInks.has(value)) continue;
+            const n = norm(value);
+            if (n && normProductName.has(n)) continue;
+            if (reportedMissing.has(value)) continue;
+            reportedMissing.add(value);
+            const shiftLabel = shift === 'day' ? '주' : (shift === 'night' ? '야' : shift);
+            const mname = String(machine.machine || '');
+            issues.push({
+              category: 'product-not-in-master',
+              severity: 'error',
+              label: '사출계획에 있으나 제품 마스터에 없음',
+              target: value,
+              detail: `${floor} ${mname} ${day}/${shiftLabel}`,
+              navTo: 'products',
+              key: `product-not-in-master:${value}`,
+            });
+          }
+        }
+      }
+    }
+
+    // 4) products[].inks 의 잉크 중 machineAssignments에 없는 것
+    const inksFromProducts = new Set();
+    for (const inks of productInks.values()) {
+      for (const ink of inks) inksFromProducts.add(String(ink || '').trim());
+    }
+    const reportedInk = new Set();
+    for (const ink of inksFromProducts) {
+      if (!ink) continue;
+      if (inkAssignCount.has(ink)) continue;
+      if (reportedInk.has(ink)) continue;
+      reportedInk.add(ink);
+      issues.push({
+        category: 'ink-not-in-assignments',
+        severity: 'warn',
+        label: '잉크가 잉크 마스터에 등록 안 됨',
+        target: ink,
+        detail: '',
+        navTo: 'machines',
+        key: `ink-not-in-assignments:${ink}`,
+      });
+    }
+
+    // 5) machineAssignments에 있지만 어떤 제품도 사용하지 않는 잉크 (info)
+    for (const ink of inkAssignCount.keys()) {
+      if (inksFromProducts.has(ink)) continue;
+      issues.push({
+        category: 'orphan-ink-assignment',
+        severity: 'info',
+        label: '사용되지 않는 잉크 마스터',
+        target: ink,
+        detail: '제품 마스터에서 사용 안 함',
+        navTo: 'machines',
+        key: `orphan-ink-assignment:${ink}`,
+      });
+    }
+
+    const sevWeight = { error: 2, warn: 1, info: 0 };
+    issues.sort((a, b) => {
+      const ws = sevWeight[b.severity] - sevWeight[a.severity];
+      if (ws !== 0) return ws;
+      if (a.category !== b.category) return a.category.localeCompare(b.category);
+      return a.target.localeCompare(b.target);
+    });
+
+    const byCategory = {};
+    const bySeverity = { error: 0, warn: 0, info: 0 };
+    for (const it of issues) {
+      byCategory[it.category] = (byCategory[it.category] || 0) + 1;
+      bySeverity[it.severity] = (bySeverity[it.severity] || 0) + 1;
+    }
+    return {
+      summary: { total: issues.length, byCategory, bySeverity },
+      issues,
+    };
+  }
+
   function localDateISO(now = new Date()) {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -384,6 +558,7 @@
     updateMachineAssignment,
     machineNoOf,
     aggregateChemicalRequest,
+    lintMasters,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,

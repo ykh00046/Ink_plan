@@ -13,3 +13,5 @@ __pycache__/
 data/db/
 data/backups/
 data/settings.json
+.pytest-tmp/
+.pytest_tmp/

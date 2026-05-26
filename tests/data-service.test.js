@@ -202,3 +202,175 @@ test('aggregateChemicalRequest: 차주월 키도 days에 넣으면 집계됨', (
   const withNext = DataService.aggregateChemicalRequest(data, { days: ['월','화','수','목','금','토','일','차주월'] });
   assert.equal(withNext.rows[0].total, 3);
 });
+
+// ── lintMasters ────────────────────────────────────────────────────────────
+
+test('lintMasters: 빈 데이터는 이슈 0건, 충돌 없이 통과', () => {
+  const empty = DataService.lintMasters({});
+  assert.equal(empty.summary.total, 0);
+  assert.deepEqual(empty.issues, []);
+  const empty2 = DataService.lintMasters({ products: [], machineAssignments: [], injection: {} });
+  assert.equal(empty2.summary.total, 0);
+});
+
+test('lintMasters: 잉크 비어있는 제품은 product-no-inks (error)', () => {
+  const data = {
+    products: [
+      { name: 'P1', brand: 'B1', inks: ['INK1'] },
+      { name: 'P2', brand: 'B2', inks: [null, null, null] },
+      { name: 'P3', brand: 'B3', inks: [] },
+    ],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {},
+  };
+  const r = DataService.lintMasters(data);
+  const ids = r.issues.filter(i => i.category === 'product-no-inks').map(i => i.target).sort();
+  assert.deepEqual(ids, ['P2', 'P3']);
+  for (const i of r.issues.filter(i => i.category === 'product-no-inks')) {
+    assert.equal(i.severity, 'error');
+    assert.equal(i.navTo, 'products');
+  }
+});
+
+test('lintMasters: 사출계획에 있으나 제품 마스터에 없으면 product-not-in-master', () => {
+  const data = {
+    products: [{ name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [
+        { machine: '10호기', schedule: { 월: { day: 'KNOWN', night: 'UNKNOWN' }, 화: { day: '' } } },
+      ],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  const missing = r.issues.filter(i => i.category === 'product-not-in-master');
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].target, 'UNKNOWN');
+  assert.equal(missing[0].severity, 'error');
+  assert.match(missing[0].detail, /3층.*10호기.*월.*야/);
+});
+
+test('lintMasters: 정규화 함수 주입 시 표기 차이는 무시', () => {
+  const data = {
+    products: [{ name: 'BELLA D_Cedar', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: { 월: { day: 'bella d cedar' } } }],
+    },
+  };
+  const upper = (s) => String(s || '').trim().toUpperCase().replace(/[\s_]/g, '');
+  const r = DataService.lintMasters(data, { normalize: upper });
+  const missing = r.issues.filter(i => i.category === 'product-not-in-master');
+  assert.equal(missing.length, 0);
+});
+
+test('lintMasters: 잉크 코드/호기 미입력은 warn', () => {
+  const data = {
+    products: [{ name: 'P1', inks: ['INK1', 'INK2', 'INK3'] }],
+    machineAssignments: [
+      { ink: 'INK1', machine: '10호기', code: 'C1' },
+      { ink: 'INK2', machine: '11호기', code: '' },
+      { ink: 'INK3', machine: '', code: 'C3' },
+    ],
+    injection: {},
+  };
+  const r = DataService.lintMasters(data);
+  const noCode = r.issues.filter(i => i.category === 'ink-no-code').map(i => i.target);
+  const noMach = r.issues.filter(i => i.category === 'ink-no-machine').map(i => i.target);
+  assert.deepEqual(noCode, ['INK2']);
+  assert.deepEqual(noMach, ['INK3']);
+  for (const i of r.issues.filter(i => i.category === 'ink-no-code' || i.category === 'ink-no-machine')) {
+    assert.equal(i.severity, 'warn');
+  }
+});
+
+test('lintMasters: products[].inks에 있지만 assignment 없으면 ink-not-in-assignments', () => {
+  const data = {
+    products: [{ name: 'P1', inks: ['INK1', 'GHOST'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {},
+  };
+  const r = DataService.lintMasters(data);
+  const ghosts = r.issues.filter(i => i.category === 'ink-not-in-assignments').map(i => i.target);
+  assert.deepEqual(ghosts, ['GHOST']);
+});
+
+test('lintMasters: 사용되지 않는 잉크 마스터는 orphan (info)', () => {
+  const data = {
+    products: [{ name: 'P1', inks: ['INK1'] }],
+    machineAssignments: [
+      { ink: 'INK1', machine: '10호기', code: 'C1' },
+      { ink: 'UNUSED', machine: '11호기', code: 'C2' },
+    ],
+    injection: {},
+  };
+  const r = DataService.lintMasters(data);
+  const orphans = r.issues.filter(i => i.category === 'orphan-ink-assignment');
+  assert.equal(orphans.length, 1);
+  assert.equal(orphans[0].target, 'UNUSED');
+  assert.equal(orphans[0].severity, 'info');
+});
+
+test('lintMasters: 같은 잉크 이름이 여러 행이면 duplicate-ink-assignment', () => {
+  const data = {
+    products: [{ name: 'P1', inks: ['DUP'] }],
+    machineAssignments: [
+      { ink: 'DUP', machine: '10호기', code: 'C1' },
+      { ink: 'DUP', machine: '11호기', code: 'C1' },
+      { ink: 'DUP', machine: '12호기', code: 'C1' },
+    ],
+    injection: {},
+  };
+  const r = DataService.lintMasters(data);
+  const dup = r.issues.filter(i => i.category === 'duplicate-ink-assignment');
+  assert.equal(dup.length, 1);
+  assert.equal(dup[0].target, 'DUP');
+  assert.equal(dup[0].detail, '중복 3건');
+});
+
+test('lintMasters: 정렬 순서 — severity desc → category → target asc', () => {
+  const data = {
+    products: [
+      { name: 'PB_empty', inks: [] },
+      { name: 'PA_empty', inks: [] },
+      { name: 'PC_ok', inks: ['INK1'] },
+    ],
+    machineAssignments: [
+      { ink: 'INK1', machine: '10호기', code: '' },
+      { ink: 'UNUSED', machine: '11호기', code: 'C2' },
+    ],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: { 월: { day: 'UNK_PRODUCT' } } }],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  // 첫 이슈는 error 그룹이어야 함
+  assert.equal(r.issues[0].severity, 'error');
+  // error 안에서 product-no-inks 가 alphabetic 정렬되어야 함
+  const errors = r.issues.filter(i => i.severity === 'error');
+  const empties = errors.filter(i => i.category === 'product-no-inks').map(i => i.target);
+  assert.deepEqual(empties, ['PA_empty', 'PB_empty']);
+  // 마지막은 info(orphan)
+  assert.equal(r.issues[r.issues.length - 1].category, 'orphan-ink-assignment');
+});
+
+test('lintMasters: byCategory / bySeverity 집계 정확', () => {
+  const data = {
+    products: [
+      { name: 'P_empty', inks: [] },
+      { name: 'P_ok', inks: ['INK_KNOWN'] },
+    ],
+    machineAssignments: [
+      { ink: 'INK_KNOWN', machine: '', code: '' },
+      { ink: 'INK_ORPHAN', machine: '12호기', code: 'C3' },
+    ],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: { 월: { day: 'UNK' } } }],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  assert.equal(r.summary.bySeverity.error, 2);  // P_empty + UNK
+  assert.ok(r.summary.bySeverity.warn >= 2);    // INK_KNOWN no-code + no-machine
+  assert.equal(r.summary.bySeverity.info, 1);   // INK_ORPHAN
+  assert.equal(r.summary.total, r.issues.length);
+});
