@@ -365,18 +365,10 @@ function ReviewPage({ ctx }) {
   const { data, setData, notify, ocrResult, setOcrResult, setLastMergeInfo, setView } = ctx;
 
   // 마스터에 알려진 잉크: machineAssignments(정본) + inkPlan + 제품 inks 합집합.
-  const allInks = useMemo(() => {
-    const map = new Map();
-    const add = (raw) => {
-      if (!raw) return;
-      const norm = String(raw).trim().toLowerCase();
-      if (norm && !map.has(norm)) map.set(norm, raw);
-    };
-    for (const a of (data.machineAssignments || [])) add(inkOfAssignment(a));
-    for (const i of (data.inkPlan || [])) add(i.name);
-    for (const p of data.products) for (const ink of (p.inks || [])) add(ink);
-    return Array.from(map.values()).sort();
-  }, [data.products, data.machineAssignments, data.inkPlan]);
+  const allInks = useMemo(
+    () => DataService.buildInkMaster(data),
+    [data.products, data.machineAssignments, data.inkPlan]
+  );
 
   const knownInkSet = useMemo(() => {
     const s = new Set();

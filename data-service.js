@@ -547,6 +547,30 @@
     return next;
   }
 
+  // 잉크 마스터(정본 목록): machineAssignments + inkPlan + products[].inks 합집합.
+  // 정규화(trim+lowercase) 후 dedup, 표시명은 첫 발견 원형 유지, 정렬 반환.
+  // ui.jsx의 inkOfAssignment 규칙(a.ink || a.product || a.name)을 내장 — 순수 계층은 ui.jsx 의존 불가.
+  function buildInkMaster(data) {
+    const map = new Map();
+    const add = (raw) => {
+      if (!raw) return;
+      const norm = String(raw).trim().toLowerCase();
+      if (norm && !map.has(norm)) map.set(norm, raw);
+    };
+    const d = data || {};
+    for (const a of (d.machineAssignments || [])) add(a && (a.ink || a.product || a.name));
+    for (const i of (d.inkPlan || [])) add(i && i.name);
+    for (const p of (d.products || [])) for (const ink of ((p && p.inks) || [])) add(ink);
+    return Array.from(map.values()).sort();
+  }
+
+  // 잉크명이 마스터 목록에 있는지 정규화 비교.
+  function isInkInMaster(name, master) {
+    const norm = String(name == null ? '' : name).trim().toLowerCase();
+    if (!norm) return false;
+    return (master || []).some(m => String(m == null ? '' : m).trim().toLowerCase() === norm);
+  }
+
   return {
     getInjectionColumns,
     moveInjectionCell,
@@ -571,5 +595,7 @@
     relabelInventoryLot,
     removeInventoryLot,
     removeInventoryInk,
+    buildInkMaster,
+    isInkInMaster,
   };
 });

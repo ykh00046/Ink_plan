@@ -26,19 +26,11 @@ function ProductsPage({ ctx }) {
   }, [data.products]);
 
   // 마스터에 알려진 잉크: machineAssignments(정본) + inkPlan + 기존 제품의 inks 합집합.
-  // 정규화 후 dedup하되 표시 이름은 첫 발견 원형 유지.
-  const allInks = useMemo(() => {
-    const map = new Map();
-    const add = (raw) => {
-      if (!raw) return;
-      const norm = String(raw).trim().toLowerCase();
-      if (norm && !map.has(norm)) map.set(norm, raw);
-    };
-    for (const a of (data.machineAssignments || [])) add(inkOfAssignment(a));
-    for (const i of (data.inkPlan || [])) add(i.name);
-    for (const p of data.products) for (const ink of (p.inks || [])) add(ink);
-    return Array.from(map.values()).sort();
-  }, [data.products, data.machineAssignments, data.inkPlan]);
+  // 순수 함수 DataService.buildInkMaster 로 일원화(검수 페이지와 동일 로직).
+  const allInks = useMemo(
+    () => DataService.buildInkMaster(data),
+    [data.products, data.machineAssignments, data.inkPlan]
+  );
 
   // 마스터에 없는 잉크인지 검사 (정규화 비교)
   const knownInkSet = useMemo(() => {
@@ -379,10 +371,16 @@ function normalizeInkName(name) {
   return String(name || '').trim().toLowerCase();
 }
 
-// 단일 잉크 슬롯 입력 — text + datalist + X 버튼.
-// suggestions는 마스터의 알려진 잉크명. 미등록 입력이면 빨간 테두리 + 힌트로 표기.
+// 단일 잉크 슬롯 — 제약된 검색 선택기(자유 텍스트 금지).
+// suggestions(마스터 잉크명)에 등록된 잉크만 선택 가능. 신규 잉크는 '잉크 추가 및 관리'에서만.
+// 기존 저장값이 마스터에 없으면 빨간 테두리 + '마스터 미등록' 표기로 유지.
 function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
-  const datalistId = useMemo(() => `ink-dl-${Math.random().toString(36).slice(2, 8)}`, []);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 240 });
+  const triggerRef = useRef(null);
+  const popRef = useRef(null);
+
   const knownSet = useMemo(() => {
     const s = new Set();
     for (const v of suggestions) s.add(normalizeInkName(v));
@@ -391,24 +389,57 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
   const trimmed = (value || '').trim();
   const isUnknown = trimmed.length > 0 && !knownSet.has(normalizeInkName(trimmed));
 
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return suggestions;
+    return suggestions.filter(s => String(s).toLowerCase().includes(needle));
+  }, [suggestions, q]);
+
+  const openPop = () => {
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    setQ('');
+    setOpen(true);
+  };
+  const close = () => setOpen(false);
+  const pick = (ink) => { onChange(ink); close(); };
+
+  // open일 때만 바깥 클릭 / Esc 닫기
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (popRef.current?.contains(e.target) || triggerRef.current?.contains(e.target)) return;
+      close();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-      <input
+      <button
+        type="button"
+        ref={triggerRef}
         className="input"
-        list={datalistId}
-        value={value || ''}
-        onChange={e => onChange(e.target.value === '' ? null : e.target.value)}
-        placeholder={placeholder}
+        onClick={openPop}
+        title={isUnknown ? '잉크 마스터에 없는 이름입니다. 잉크 추가 및 관리 페이지에서 먼저 등록하세요.' : '클릭하여 잉크 선택'}
         style={{
           width: '100%',
+          textAlign: 'left',
           paddingRight: value ? 24 : 8,
+          cursor: 'pointer',
           borderColor: isUnknown ? 'var(--bad-500)' : undefined,
+          color: value ? undefined : 'var(--ink-400)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}
-        title={isUnknown ? '잉크 마스터에 없는 이름입니다. 잉크 추가 및 관리 페이지에서 먼저 등록하세요.' : undefined}
-      />
-      <datalist id={datalistId}>
-        {suggestions.map(s => <option key={s} value={s} />)}
-      </datalist>
+      >
+        {value || placeholder || '잉크 선택'}
+      </button>
       {value && (
         <button
           type="button"
@@ -427,6 +458,42 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
         <div style={{ position: 'absolute', top: '100%', left: 0, fontSize: 10, color: 'var(--bad-600)', marginTop: 2, lineHeight: 1.3 }}>
           마스터 미등록
         </div>
+      )}
+      {open && ReactDOM.createPortal(
+        <div ref={popRef} className="ink-picker__pop" style={{ top: pos.top, left: pos.left, width: pos.width }}>
+          <input
+            className="input"
+            autoFocus
+            placeholder="잉크 검색"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); if (filtered.length) pick(filtered[0]); }
+            }}
+            style={{ width: '100%' }}
+          />
+          <div className="cascade-list">
+            {filtered.map((ink, idx) => (
+              <button
+                key={ink + idx}
+                type="button"
+                className={`cascade-item ${normalizeInkName(ink) === normalizeInkName(value) ? 'cascade-item--active' : ''}`}
+                onClick={() => pick(ink)}
+              >
+                {ink}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="cascade-empty">
+                {suggestions.length === 0
+                  ? '등록된 잉크가 없습니다.'
+                  : `‘${q.trim()}’ 잉크가 마스터에 없습니다.`}
+                <div style={{ marginTop: 4, fontSize: 10 }}>잉크 추가 및 관리에서 먼저 등록하세요.</div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

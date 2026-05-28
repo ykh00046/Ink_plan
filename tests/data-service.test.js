@@ -374,3 +374,60 @@ test('lintMasters: byCategory / bySeverity 집계 정확', () => {
   assert.equal(r.summary.bySeverity.info, 1);   // INK_ORPHAN
   assert.equal(r.summary.total, r.issues.length);
 });
+
+// ── buildInkMaster / isInkInMaster (잉크 cascade 선택) ──────────────────────
+
+test('buildInkMaster: 빈/누락 데이터는 빈 배열', () => {
+  assert.deepEqual(DataService.buildInkMaster({}), []);
+  assert.deepEqual(DataService.buildInkMaster(undefined), []);
+  assert.deepEqual(DataService.buildInkMaster({ products: [], machineAssignments: [], inkPlan: [] }), []);
+});
+
+test('buildInkMaster: machineAssignments+inkPlan+products.inks 합집합 dedup', () => {
+  const data = {
+    machineAssignments: [{ ink: 'A_INK' }, { ink: 'B_INK' }],
+    inkPlan: [{ name: 'B_INK' }, { name: 'C_INK' }],
+    products: [{ inks: ['C_INK', 'D_INK', null] }],
+  };
+  assert.deepEqual(DataService.buildInkMaster(data), ['A_INK', 'B_INK', 'C_INK', 'D_INK']);
+});
+
+test('buildInkMaster: 정규화(대소문자/공백) dedup — 첫 발견 원형 유지', () => {
+  const data = {
+    machineAssignments: [{ ink: 'Red Ink' }],
+    inkPlan: [{ name: ' red ink ' }, { name: 'RED INK' }],
+    products: [{ inks: ['red ink'] }],
+  };
+  assert.deepEqual(DataService.buildInkMaster(data), ['Red Ink']);
+});
+
+test('buildInkMaster: 정렬된 결과 반환', () => {
+  const data = { inkPlan: [{ name: 'Z' }, { name: 'A' }, { name: 'M' }] };
+  assert.deepEqual(DataService.buildInkMaster(data), ['A', 'M', 'Z']);
+});
+
+test('buildInkMaster: assignment ink 추출 우선순위 (ink > product > name)', () => {
+  const data = {
+    machineAssignments: [
+      { ink: 'BY_INK', product: 'X', name: 'Y' },
+      { product: 'BY_PRODUCT', name: 'Y' },
+      { name: 'BY_NAME' },
+    ],
+  };
+  assert.deepEqual(DataService.buildInkMaster(data), ['BY_INK', 'BY_NAME', 'BY_PRODUCT']);
+});
+
+test('buildInkMaster: null/빈 잉크 슬롯 무시', () => {
+  const data = { products: [{ inks: [null, '', '  ', 'OK'] }] };
+  assert.deepEqual(DataService.buildInkMaster(data), ['OK']);
+});
+
+test('isInkInMaster: 정규화 매칭 / 미존재 / 빈 입력', () => {
+  const master = ['Red Ink', 'Blue'];
+  assert.equal(DataService.isInkInMaster('red ink', master), true);
+  assert.equal(DataService.isInkInMaster('  RED INK ', master), true);
+  assert.equal(DataService.isInkInMaster('Green', master), false);
+  assert.equal(DataService.isInkInMaster('', master), false);
+  assert.equal(DataService.isInkInMaster(null, master), false);
+  assert.equal(DataService.isInkInMaster('Blue', []), false);
+});
