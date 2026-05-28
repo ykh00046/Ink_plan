@@ -110,13 +110,15 @@ function ProductsPage({ ctx }) {
       newData.products = [normalized, ...newData.products];
       notify('제품이 추가되었습니다');
     } else {
-      const idx = newData.products.findIndex(p => p === editing.product);
+      // 제품명은 마스터의 사실상 PK. 객체 identity 대신 원본 name 으로 찾아
+      // 그 사이 products 배열이 재생성돼도 안정적으로 대상 행을 찾는다.
+      const oldName = editing.product.name;
+      const idx = newData.products.findIndex(p => p.name === oldName);
       if (idx < 0) {
         notify('수정할 제품을 찾을 수 없습니다. 목록을 새로 확인하세요.');
         setEditing(null);
         return;
       }
-      const oldName = editing.product.name;
       newData.products = [...newData.products];
       newData.products[idx] = normalized;
       newData.injection = DataService.renameInjectionRefs(data.injection, oldName, normalized.name);
@@ -134,7 +136,7 @@ function ProductsPage({ ctx }) {
       return;
     }
     const newData = { ...data };
-    newData.products = newData.products.filter(p => p !== product);
+    newData.products = newData.products.filter(p => p.name !== product.name);
     setData(newData);
     setConfirmDelete(null);
     notify('제품이 삭제되었습니다');

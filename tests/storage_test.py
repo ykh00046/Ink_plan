@@ -75,5 +75,32 @@ class StorageTest(unittest.TestCase):
                 self.assertEqual(storage.read_backup(f"../{backup.name}")["version"], 3)
 
 
+    def test_prune_keeps_important_backups_over_startup_noise(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = root / "db"
+            backups = root / "backups"
+            seed = root / "clean.json"
+            db.mkdir()
+            backups.mkdir()
+            seed.write_text("{}", encoding="utf-8")
+            current = db / "current.json"
+            current.write_text(json.dumps({"version": 1}), encoding="utf-8")
+
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current):
+                # 오래된 manual 1개 + startup 25개
+                storage.create_backup("manual", now=datetime(2026, 5, 1, 9, 0, 0))
+                for i in range(25):
+                    storage.create_backup("startup", now=datetime(2026, 5, 2, 9, i, 0))
+                removed = storage.prune_backups(keep=90, keep_startup=20)
+
+            names = [p.name for p in backups.glob("*.json")]
+            startup_left = [n for n in names if "_startup" in n]
+            important_left = [n for n in names if "_startup" not in n]
+            self.assertEqual(len(startup_left), 20)   # startup 은 20개로 캡
+            self.assertEqual(len(important_left), 1)   # 오래됐어도 manual 은 보존
+            self.assertEqual(removed, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

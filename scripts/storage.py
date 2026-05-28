@@ -118,8 +118,17 @@ def restore_backup(name):
         return source
 
 
-def prune_backups(keep=90):
-    backups = list_backups()
-    for path in backups[keep:]:
+def prune_backups(keep=90, keep_startup=20):
+    # 매 실행마다 쌓이는 startup 백업이 manual/before_*/scheduled 같은 의미 있는
+    # 스냅샷을 조기에 밀어내지 않도록 분리 보존한다.
+    backups = list_backups()  # 최신순(이름 역순)
+    startup = [p for p in backups if "_startup" in p.stem]
+    important = [p for p in backups if "_startup" not in p.stem]
+    removed = 0
+    for path in startup[keep_startup:]:
         path.unlink(missing_ok=True)
-    return max(0, len(backups) - keep)
+        removed += 1
+    for path in important[keep:]:
+        path.unlink(missing_ok=True)
+        removed += 1
+    return removed

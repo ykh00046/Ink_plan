@@ -26,6 +26,8 @@ URL = f"http://127.0.0.1:{PORT}/"
 BLOCKED_STATIC_PREFIXES = ("/data/db", "/data/backups", "/data/settings")
 # 요청 본문 상한 (DB 저장용) — 메모리 보호
 MAX_BODY_BYTES = 64 * 1024 * 1024
+# /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
+ALLOWED_HOSTS = ("127.0.0.1:8765", "localhost:8765", "127.0.0.1", "localhost")
 
 
 def port_is_open():
@@ -57,6 +59,19 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def is_api_request_allowed(self):
+        # Host 헤더가 로컬이 아니면 거부 (DNS rebinding 방어 — 공격자 도메인이 127.0.0.1로
+        # 리바인딩돼도 Host 는 공격자 도메인이라 차단됨).
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host and host not in ALLOWED_HOSTS:
+            return False
+        # Origin 이 있으면(=다른 사이트의 fetch 등) 로컬 출처와 일치해야 함 (CSRF 방어).
+        origin = self.headers.get("Origin")
+        if origin:
+            if urlparse(origin).netloc.lower() not in ALLOWED_HOSTS:
+                return False
+        return True
+
     def is_blocked_static(self):
         # 런타임 데이터(키/DB/백업)는 정적 파일로 노출 금지.
         # 퍼센트 인코딩 해제 + 소문자화로 인코딩·대소문자 우회 차단.
@@ -78,6 +93,9 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/") and not self.is_api_request_allowed():
+            self.send_json({"error": "forbidden"}, 403)
+            return
         if path == "/api/db":
             self.send_json(read_current())
             return
@@ -114,6 +132,9 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_HEAD()
 
     def do_POST(self):
+        if not self.is_api_request_allowed():
+            self.send_json({"error": "forbidden"}, 403)
+            return
         try:
             if self.path == "/api/db":
                 data = self.read_body_json()

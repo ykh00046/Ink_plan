@@ -722,11 +722,17 @@ function InventoryPage({ ctx }) {
     const added = [];
     const failed = [];
     let working = { ...inv, lots: [...inv.lots], order: orderedInitialLots.map(l => l.id) };
+    // id→lot Map 으로 order 내 동일 잉크의 마지막 위치를 O(order)로 탐색 (중첩 find 제거 → 대량 붙여넣기 시 멈춤 방지).
+    const lotById = new Map(working.lots.map(l => [l.id, l]));
     for (const ln of lines) {
       const r = registerLot(ln, working);
       if (r.ok) {
         working.lots.push(r.lot);
-        const sameInkIdx = working.order.map(id => working.lots.find(l => l.id === id)).reduce((last, l, i) => l?.ink === r.lot.ink ? i : last, -1);
+        lotById.set(r.lot.id, r.lot);
+        let sameInkIdx = -1;
+        for (let i = 0; i < working.order.length; i++) {
+          if (lotById.get(working.order[i])?.ink === r.lot.ink) sameInkIdx = i;
+        }
         const insertAt = sameInkIdx >= 0 ? sameInkIdx + 1 : working.order.length;
         working.order = [...working.order.slice(0, insertAt), r.lot.id, ...working.order.slice(insertAt)];
         added.push(r.lot);

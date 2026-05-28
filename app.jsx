@@ -78,7 +78,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 49;
+const APP_REV = 50;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -494,7 +494,7 @@ function BackupControls({ setData, notify }) {
           </div>
         ))}
       </div>
-      <div className="field__hint">자동 백업은 매일 18:30에 생성됩니다. 최근 백업 90개를 보관합니다.</div>
+      <div className="field__hint">자동 백업은 매일 18:30에 생성됩니다. 수동·복원전·예약 백업은 최근 90개, 자동 시작 백업은 최근 20개를 보관합니다.</div>
     </div>
   );
 }

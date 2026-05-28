@@ -238,8 +238,6 @@ function InjectionPage({ ctx }) {
                 { value: '1층', label: '1층' },
               ]}
             />
-            <button className="btn"><Icon name="download" /> 엑셀 내보내기</button>
-            <button className="btn btn--primary"><Icon name="save" /> 저장</button>
           </div>
         </div>
       </div>

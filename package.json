@@ -4,6 +4,6 @@
   "private": true,
   "description": "잉크/사출 생산계획 시스템 — data-service 순수 로직 단위 테스트",
   "scripts": {
-    "test": "node --test tests/data-service.test.js tests/ui-regressions.test.js"
+    "test": "node --test tests/data-service.test.js tests/ui-regressions.test.js tests/date-utils.test.js"
   }
 }

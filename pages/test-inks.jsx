@@ -43,9 +43,15 @@ function TestInksPage({ ctx }) {
   };
 
   const handleSave = (t) => {
-    const idx = list.indexOf(editing);
-    const next = [...list];
-    next[idx] = t;
+    // editing 은 모달에서 새 객체로 교체되므로 indexOf(editing) 은 -1.
+    // 편집 시작 시 보존한 _origName(없으면 현재 name)으로 원본 행을 찾는다.
+    const cur = data.testInks || [];
+    const origName = t._origName != null ? t._origName : t.name;
+    const realIdx = cur.findIndex(x => x.name === origName);
+    if (realIdx < 0) { setEditing(null); return; }
+    const { _origName, ...clean } = t;
+    const next = [...cur];
+    next[realIdx] = clean;
     updateData(next);
     setEditing(null);
     notify('수정 완료');
@@ -80,9 +86,7 @@ function TestInksPage({ ctx }) {
               <span className="page__meta-chip">내부검증 <strong>{counts.내부검증}</strong></span>
             </div>
           </div>
-          <div className="page__actions">
-            <button className="btn"><Icon name="download" /> 내보내기</button>
-          </div>
+          <div className="page__actions"></div>
         </div>
       </div>
 
@@ -196,7 +200,7 @@ function TestInksPage({ ctx }) {
                       <button className="btn btn--sm btn--ghost" onClick={() => handlePromote(t)} title="정식 잉크로 승격">
                         <Icon name="check" size={11} /> 승격
                       </button>
-                      <button className="btn btn--sm btn--ghost" onClick={() => setEditing(t)}><Icon name="edit" size={11} /></button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => setEditing({ ...t, _origName: t.name })}><Icon name="edit" size={11} /></button>
                       <button className="btn btn--sm btn--ghost btn--danger" onClick={() => setConfirmDelete(t)}><Icon name="trash" size={11} /></button>
                     </td>
                   </tr>

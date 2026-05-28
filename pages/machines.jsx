@@ -80,11 +80,13 @@ function MachinesPage({ ctx }) {
     return m;
   }, [data.machineAssignments]);
 
-  const handleSaveEdit = (idx) => {
+  const handleSaveEdit = (target) => {
+    // target 은 data.machineAssignments 의 실제 객체(필터는 참조 보존). 위치 인덱스 대신
+    // 객체로 찾아 검색/필터가 바뀌어도 엉뚱한 행을 덮어쓰지 않게 한다.
     const newData = { ...data };
     newData.machineAssignments = [...newData.machineAssignments];
-    const target = filtered[idx];
     const realIdx = newData.machineAssignments.indexOf(target);
+    if (realIdx < 0) { setEditingIdx(null); return; }
     newData.machineAssignments[realIdx] = { ...target, machine: editValue };
     setData(newData);
     setEditingIdx(null);
@@ -256,24 +258,24 @@ function MachinesPage({ ctx }) {
                         </td>
                         <td style={{ fontWeight: 500 }}>{inkName}</td>
                         <td>
-                          {editingIdx === idx ? (
+                          {editingIdx === a ? (
                             <input
                               className="input" autoFocus
                               list="machine-list"
                               value={editValue}
                               onChange={e => setEditValue(e.target.value)}
-                              onBlur={() => handleSaveEdit(idx)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(idx); if (e.key === 'Escape') setEditingIdx(null); }}
+                              onBlur={() => handleSaveEdit(a)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(a); if (e.key === 'Escape') setEditingIdx(null); }}
                               style={{ width: 120 }}
                             />
                           ) : (
-                            <span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }} onClick={() => { setEditingIdx(idx); setEditValue(a.machine || ''); }}>
+                            <span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }} onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}>
                               {a.machine || <span style={{ color: 'var(--ink-400)' }}>호기 미지정</span>}
                             </span>
                           )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn--sm btn--ghost" onClick={() => { setEditingIdx(idx); setEditValue(a.machine || ''); }}><Icon name="edit" size={11} /></button>
+                          <button className="btn btn--sm btn--ghost" onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}><Icon name="edit" size={11} /></button>
                           <button className="btn btn--sm btn--ghost btn--danger" onClick={() => handleDelete(a)}><Icon name="trash" size={11} /></button>
                         </td>
                       </tr>
