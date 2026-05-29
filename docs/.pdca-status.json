@@ -4,6 +4,18 @@
   "activeFeatures": [],
   "primaryFeature": null,
   "features": {
+    "약품요청서": {
+      "phase": "archived",
+      "matchRate": 95,
+      "archivedTo": "docs/archive/2026-05/약품요청서/",
+      "archivedAt": "2026-05-29"
+    },
+    "마스터-정합성": {
+      "phase": "archived",
+      "matchRate": 95,
+      "archivedTo": "docs/archive/2026-05/마스터-정합성/",
+      "archivedAt": "2026-05-29"
+    },
     "잉크-cascade-선택": {
       "phase": "archived",
       "matchRate": 95,
@@ -27,6 +39,18 @@
       "event": "archived",
       "at": "2026-05-29",
       "archivedTo": "docs/archive/2026-05/잉크-cascade-선택/"
+    },
+    {
+      "feature": "약품요청서",
+      "event": "archived",
+      "at": "2026-05-29",
+      "archivedTo": "docs/archive/2026-05/약품요청서/"
+    },
+    {
+      "feature": "마스터-정합성",
+      "event": "archived",
+      "at": "2026-05-29",
+      "archivedTo": "docs/archive/2026-05/마스터-정합성/"
     }
   ]
 }
