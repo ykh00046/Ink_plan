@@ -264,6 +264,16 @@ button { background: none; border: none; cursor: pointer; }
 }
 .sb-item.active .sb-item__badge { background: var(--brand-100); color: var(--brand-700); }
 
+/* 라벨 + 한 줄 부제(자동 누적 안내) — 헷갈리는 메뉴 구분용 */
+.sb-item__text { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; min-width: 0; }
+.sb-item__desc {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--ink-500);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sb-item.active .sb-item__desc { color: var(--brand-600); }
+
 .sb-footer {
   margin-top: auto;
   padding: 12px;

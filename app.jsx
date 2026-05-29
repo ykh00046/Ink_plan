@@ -58,8 +58,8 @@ const NAV = [
     { id: 'history',    label: '기록 조회', icon: 'history' },
   ]},
   { group: '현장 공급', items: [
-    { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add' },
-    { id: 'chemicals', label: '약품요청서',   icon: 'beaker' },
+    { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add',    desc: '오늘·내일 공급 (자동 누적)' },
+    { id: 'chemicals', label: '약품요청서',   icon: 'beaker', desc: '기간별 발주 집계 (코드)' },
     { id: 'test-inks', label: '양산대응',     icon: 'beaker' },
   ]},
   { group: '마스터', items: [
@@ -78,7 +78,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 52;
+const APP_REV = 53;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -300,7 +300,9 @@ function App() {
                 {item.step
                   ? <span className="sb-item__step">{item.step}</span>
                   : <span className="sb-item__icon"><Icon name={item.icon} /></span>}
-                <span>{item.label}</span>
+                {item.desc
+                  ? <span className="sb-item__text"><span>{item.label}</span><span className="sb-item__desc">{item.desc}</span></span>
+                  : <span>{item.label}</span>}
                 {item.id === 'products' && <span className="sb-item__badge">{data.products?.length || 0}</span>}
                 {item.id === 'test-inks' && <span className="sb-item__badge" style={{background:'oklch(0.95 0.05 30)',color:'oklch(0.50 0.16 30)'}}>{data.testInks?.length || 0}</span>}
               </div>
