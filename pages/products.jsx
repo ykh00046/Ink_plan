@@ -395,16 +395,21 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
     return suggestions.filter(s => String(s).toLowerCase().includes(needle));
   }, [suggestions, q]);
 
-  const openPop = () => {
+  // 트리거 버튼의 현재 화면 좌표로 팝오버 위치 갱신 (position:fixed 기준).
+  const recomputePos = () => {
     const r = triggerRef.current?.getBoundingClientRect();
     if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+  };
+  const openPop = () => {
+    recomputePos();
     setQ('');
     setOpen(true);
   };
   const close = () => setOpen(false);
   const pick = (ink) => { onChange(ink); close(); };
 
-  // open일 때만 바깥 클릭 / Esc 닫기
+  // open일 때만 바깥 클릭 / Esc 닫기 + 스크롤·리사이즈 시 위치 재계산
+  // (표가 스크롤되면 버튼을 따라가야 함. scroll은 버블 안 하므로 capture로 듣는다.)
   useEffect(() => {
     if (!open) return;
     const onDown = (e) => {
@@ -414,9 +419,13 @@ function InkSlotInput({ value, onChange, suggestions = [], placeholder = '' }) {
     const onKey = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', recomputePos, true);
+    window.addEventListener('resize', recomputePos);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', recomputePos, true);
+      window.removeEventListener('resize', recomputePos);
     };
   }, [open]);
 
