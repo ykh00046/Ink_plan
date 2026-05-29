@@ -103,6 +103,7 @@ function InkAddPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">넣어줄 잉크</div>
+            <div className="page__subtitle"><strong>사출계획에서 자동 누적</strong> · 오늘 주/야 + 내일 주 현장에 넣어줄 잉크 (직접 안 세도 됨)</div>
             <div className="page__meta-chips">
               <span className="page__meta-chip">3층 <strong>{totals.f3}</strong></span>
               <span className="page__meta-chip">1층 <strong>{totals.f1}</strong></span>

@@ -85,6 +85,7 @@ function ChemicalsPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">약품요청서</div>
+            <div className="page__subtitle"><strong>사출계획에서 자동 누적</strong> · 선택 기간의 발주용 집계 (품목코드·사용 호기 포함)</div>
             <div className="page__meta-chips">
               <span className="page__meta-chip">잉크 <strong>{totals.kinds}</strong>종</span>
               <span className="page__meta-chip">3층 <strong>{totals.f3}</strong></span>
