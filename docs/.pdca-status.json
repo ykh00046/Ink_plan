@@ -1,9 +1,16 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-05-13T03:29:18.957Z",
+  "lastUpdated": "2026-05-29T00:00:00.000Z",
   "activeFeatures": [],
   "primaryFeature": null,
-  "features": {},
+  "features": {
+    "잉크-cascade-선택": {
+      "phase": "archived",
+      "matchRate": 95,
+      "archivedTo": "docs/archive/2026-05/잉크-cascade-선택/",
+      "archivedAt": "2026-05-29"
+    }
+  },
   "pipeline": {
     "currentPhase": 1,
     "level": "Dynamic",
@@ -12,7 +19,14 @@
   "session": {
     "startedAt": "2026-05-13T03:29:18.957Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-05-13T03:29:18.957Z"
+    "lastActivity": "2026-05-29T00:00:00.000Z"
   },
-  "history": []
+  "history": [
+    {
+      "feature": "잉크-cascade-선택",
+      "event": "archived",
+      "at": "2026-05-29",
+      "archivedTo": "docs/archive/2026-05/잉크-cascade-선택/"
+    }
+  ]
 }
