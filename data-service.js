@@ -571,6 +571,471 @@
     return (master || []).some(m => String(m == null ? '' : m).trim().toLowerCase() === norm);
   }
 
+  // ── 공유 normalize 헬퍼 (ui.jsx 에서 위임) ──────────────────────────────────
+
+  // 제품명 정규화 (OCR ↔ master 비교용): NFC + 대문자 + 공백/특수문자 제거
+  function normalizeProductName(name) {
+    if (!name) return '';
+    let s = String(name).normalize('NFC').trim().toUpperCase();
+    s = s.replace(/[_\-\s/\\()（）\[\]【】·・.,，]+/g, '');
+    s = s.replace(/[^\w가-힣%]/g, '');
+    return s;
+  }
+
+  // OCR brand "PIA / 액상" → "PIA" (슬래시 앞부분, 대문자)
+  function normalizeBrand(brand) {
+    if (!brand) return '';
+    return String(brand).split('/')[0].trim().toUpperCase();
+  }
+
+  // ISO 날짜 → 한국어 요일 ('월'~'일'). 잘못된 입력 시 fallback.
+  function dayFromDate(iso, fallback = '월') {
+    const d = parseDateLocal(iso);
+    if (!d) return fallback;
+    return ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+  }
+
+  // machineAssignments record에서 잉크명 추출 (구버전 호환)
+  function inkOfAssignment(a) {
+    return (a && (a.ink || a.product || a.name)) || '';
+  }
+
+  // ── ink-plan 파생 엔진 (pages/ink-plan.jsx 에서 이전) ───────────────────────
+
+  function buildProductLookup(products) {
+    const exact = new Map();
+    const normalized = new Map();
+    for (const p of products || []) {
+      if (p.name) exact.set(p.name, p);
+      const key = normalizeProductName(p.name);
+      if (key && !normalized.has(key)) normalized.set(key, p);
+    }
+    return { exact, normalized };
+  }
+
+  function resolveProductIn(lookup, name) {
+    if (!name) return null;
+    return lookup.exact.get(name)
+      || lookup.normalized.get(normalizeProductName(name))
+      || null;
+  }
+
+  // 잉크 → 사출계획에서 이 잉크를 쓰는 제품 이름 목록
+  function buildProductsUsingInk(injection, productLookup) {
+    const map = new Map();
+    for (const floor of Object.keys(injection || {})) {
+      for (const m of injection[floor]) {
+        for (const sh of Object.values(m.schedule || {})) {
+          for (const productName of [sh.day, sh.night]) {
+            const product = resolveProductIn(productLookup, productName);
+            if (!product) continue;
+            for (const ink of (product.inks || [])) {
+              if (!ink) continue;
+              if (!map.has(ink)) map.set(ink, []);
+              if (!map.get(ink).includes(product.name)) map.get(ink).push(product.name);
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }
+
+  // 잉크 × 요일 → 필요 세트 수 (사출계획 셀이 채워진 만큼)
+  function buildDemandByInkDay(injection, productLookup) {
+    const map = new Map();
+    for (const floor of Object.keys(injection || {})) {
+      for (const m of injection[floor] || []) {
+        for (const [day, shifts] of Object.entries(m.schedule || {})) {
+          for (const productName of [shifts.day, shifts.night]) {
+            const product = resolveProductIn(productLookup, productName);
+            if (!product) continue;
+            for (const ink of (product.inks || [])) {
+              if (!ink) continue;
+              if (!map.has(ink)) map.set(ink, new Map());
+              const byDay = map.get(ink);
+              byDay.set(day, (byDay.get(day) || 0) + 1);
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }
+
+  // 잉크 → 호기 매핑 (read-only)
+  function buildInkToMachine(machineAssignments) {
+    const m = new Map();
+    for (const a of (machineAssignments || [])) {
+      const ink = inkOfAssignment(a);
+      if (ink && !m.has(ink)) m.set(ink, a.machine || '');
+    }
+    return m;
+  }
+
+  // 재고 조사 연동: 잉크명 × 요일 → lot 합산 재고 (Map<ink, Map<dayKor, sum>>)
+  function buildInventoryByInkDay(inventory, dates) {
+    const result = new Map();
+    if (!inventory || !inventory.lots || !inventory.daily) return result;
+
+    const lotsByInk = new Map();
+    for (const lot of inventory.lots) {
+      if (!lotsByInk.has(lot.ink)) lotsByInk.set(lot.ink, []);
+      lotsByInk.get(lot.ink).push(lot);
+    }
+    const mdToDay = {};
+    for (const [day, md] of Object.entries(dates)) mdToDay[md] = day;
+
+    for (const [dateIso, valueMap] of Object.entries(inventory.daily)) {
+      const dt = new Date(dateIso);
+      if (isNaN(dt)) continue;
+      const md = `${dt.getMonth() + 1}/${dt.getDate()}`;
+      const dayKor = mdToDay[md];
+      if (!dayKor) continue;
+      for (const [inkName, lots] of lotsByInk.entries()) {
+        let sum = 0, any = false;
+        for (const lot of lots) {
+          const v = valueMap[lot.id];
+          if (v !== undefined && v !== null && !isNaN(Number(v))) {
+            sum += Number(v); any = true;
+          }
+        }
+        if (any) {
+          if (!result.has(inkName)) result.set(inkName, new Map());
+          result.get(inkName).set(dayKor, sum);
+        }
+      }
+    }
+    return result;
+  }
+
+  // 정식 inkPlan + testInks 머지 — 같은 이름이면 정식 유지 + testStatus 칩만
+  function mergeInkPlanAndTestInks(inkPlan, testInks, days) {
+    const testMap = new Map((testInks || []).map(t => [t.name, t]));
+    const formalNames = new Set(inkPlan.map(i => i.name));
+
+    const formal = inkPlan.map(i => {
+      const t = testMap.get(i.name);
+      return {
+        ...i,
+        isTest: false,
+        testStatus: t?.status || null,
+        testNote: t?.note || '',
+        startDay: t ? dayFromDate(t.addedDate) : '월',
+      };
+    });
+    const testOnly = (testInks || [])
+      .filter(t => !formalNames.has(t.name))
+      .map(t => ({
+        name: t.name,
+        isTest: true,
+        testStatus: t.status,
+        testNote: t.note,
+        startDay: dayFromDate(t.addedDate),
+        days: Object.fromEntries(days.map(d => [d, {}])),
+      }));
+    return [...formal, ...testOnly];
+  }
+
+  // 잉크 × 요일 → { stock, required, manufacture, availableDays, weeklyNeed, stockFromInv }
+  // stock 우선순위: 수동값 > inventory 연동 > 전날 endStock carry
+  function computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days) {
+    const result = new Map();
+    const toNum = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return isNaN(n) ? null : n;
+    };
+    const round1 = (v) => Math.round(v * 10) / 10;
+
+    for (const ink of merged) {
+      const byDay = new Map();
+      const demand = demandByInkDay.get(ink.name) || new Map();
+      const totalRequired = [...days, '차주월'].reduce((sum, d) => sum + (demand.get(d) || 0), 0);
+      let carry = null;
+
+      for (const d of days) {
+        const dd = ink.days?.[d] || {};
+        const invStock = inventoryByInkDay.get(ink.name)?.get(d);
+        const manualStock = toNum(dd['현재고']);
+        const stock = manualStock !== null
+          ? manualStock
+          : (invStock !== undefined ? Number(invStock) : carry);
+        const required = demand.get(d) || 0;
+        const manufacture = toNum(dd['제조량']) || 0;
+        const availableDays = stock !== null && required > 0 ? round1(stock / required) : null;
+        const weeklyNeed = d === '월' && stock !== null && totalRequired > 0 ? stock - totalRequired : null;
+        const endStock = stock !== null ? stock + manufacture - required : null;
+
+        byDay.set(d, {
+          stock,
+          required,
+          manufacture,
+          availableDays,
+          weeklyNeed,
+          stockFromInv: invStock !== undefined,
+        });
+        carry = endStock;
+      }
+      result.set(ink.name, byDay);
+    }
+    return result;
+  }
+
+  // 자동 배정 후보: 당일 제조량 비고, 월요일 필요수량 음수(부족)인 정식 잉크. 잠긴 셀 제외.
+  function buildAutoAssignCandidates(inkPlan, testInks, today, days, computedByInk) {
+    const out = [];
+    const testMap = new Map((testInks || []).map(t => [t.name, t]));
+    const todayIdx = days.indexOf(today);
+
+    for (const ink of (inkPlan || [])) {
+      const todayCell = ink.days?.[today] || {};
+      const cur = todayCell['제조량'];
+      if (cur != null && cur !== '') continue;
+
+      const need = computedByInk.get(ink.name)?.get('월')?.weeklyNeed;
+      if (need == null || need === '') continue;
+      const needNum = Number(need);
+      if (isNaN(needNum) || needNum >= 0) continue;
+
+      const t = testMap.get(ink.name);
+      if (t) {
+        const startIdx = days.indexOf(dayFromDate(t.addedDate));
+        if (todayIdx >= startIdx) continue;
+      }
+      out.push({ name: ink.name, need: needNum, suggested: Math.abs(needNum) });
+    }
+    return out;
+  }
+
+  // ── review / OCR 매칭 (pages/review.jsx 에서 이전) ──────────────────────────
+
+  // OCR 한 행을 마스터와 매칭 — { status, matchedName?, candidates?, suggestedBrand? }
+  function matchOcrRow(r, masterIndex) {
+    const isTest = !r.product_name || /^TEST$/i.test(r.product_name.trim());
+    if (isTest) {
+      return { isTest: true, status: 'skip', matchedName: null, confidence: 0, candidates: [] };
+    }
+
+    const normName = normalizeProductName(r.product_name);
+    const normCustomer = normalizeBrand(r.brand);
+    const sameName = masterIndex.products.filter(p => normalizeProductName(p.name) === normName);
+    const exactProduct = (normName && normCustomer)
+      ? sameName.find(p => normalizeBrand(p.customer || p.brand) === normCustomer)
+      : null;
+
+    if (exactProduct) {
+      return { isTest: false, status: 'exact', matchedName: exactProduct.name, confidence: 1, candidates: [] };
+    }
+    if (sameName.length === 1) {
+      return {
+        isTest: false,
+        status: 'brand-mismatch',
+        matchedName: sameName[0].name,
+        confidence: 0.8,
+        candidates: sameName,
+        suggestedBrand: sameName[0].customer || sameName[0].brand || '',
+      };
+    }
+    return { isTest: false, status: 'none', matchedName: null, confidence: 0, candidates: sameName };
+  }
+
+  // OCR parsed → 행 flat 리스트
+  function buildReviewRows(ocrResult, masterIndex) {
+    if (!ocrResult?.parsed) return [];
+    const out = [];
+    for (const sh of ocrResult.parsed.shifts || []) {
+      for (let i = 0; i < (sh.rows || []).length; i++) {
+        const r = sh.rows[i];
+        const match = matchOcrRow(r, masterIndex);
+        out.push({
+          rowKey: `${sh.shift}-${r.machine_no}-${i}`,
+          shift: sh.shift,
+          machine_no: r.machine_no,
+          floor: r.floor,
+          brand: r.brand,
+          variant: r.variant,
+          ocrName: r.product_name,
+          ...match,
+        });
+      }
+    }
+    return out;
+  }
+
+  // 같은 제품(이름+브랜드)을 한 그룹으로 묶음 — TEST는 행마다 별도 그룹
+  function buildProductGroups(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      const key = row.isTest
+        ? `TEST:${row.rowKey}`
+        : `${normalizeProductName(row.ocrName)}|${normalizeBrand(row.brand)}`;
+      if (!map.has(key)) {
+        map.set(key, { ...row, groupKey: key, rowKeys: [], occurs: [] });
+      }
+      const group = map.get(key);
+      group.rowKeys.push(row.rowKey);
+      group.occurs.push({ machine_no: row.machine_no, shift: row.shift, floor: row.floor });
+      if (row.status === 'exact' && group.status !== 'exact') {
+        group.status = row.status;
+        group.matchedName = row.matchedName;
+      } else if (row.status === 'brand-mismatch' && group.status === 'none') {
+        group.status = row.status;
+        group.matchedName = row.matchedName;
+        group.suggestedBrand = row.suggestedBrand;
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  // 그룹 단위로 OCR row 의 한 필드를 변경한 새 ocrResult 반환
+  function mapOcrRowsInGroup(ocrResult, rowKeys, field, value) {
+    const rowKeySet = new Set(rowKeys);
+    return {
+      ...ocrResult,
+      parsed: {
+        ...ocrResult.parsed,
+        shifts: (ocrResult.parsed.shifts || []).map(sh => ({
+          ...sh,
+          rows: (sh.rows || []).map((r, i) => {
+            const rk = `${sh.shift}-${r.machine_no}-${i}`;
+            return rowKeySet.has(rk) ? { ...r, [field]: value } : r;
+          }),
+        })),
+      },
+    };
+  }
+
+  // 호기 번호 변경은 rowKey 자체가 바뀌므로 keyMap을 함께 반환
+  function changeMachineInGroup(ocrResult, rowKeys, nextMachineNo) {
+    const rowKeySet = new Set(rowKeys);
+    const keyMap = new Map();
+    const next = {
+      ...ocrResult,
+      parsed: {
+        ...ocrResult.parsed,
+        shifts: (ocrResult.parsed.shifts || []).map(sh => ({
+          ...sh,
+          rows: (sh.rows || []).map((r, i) => {
+            const oldKey = `${sh.shift}-${r.machine_no}-${i}`;
+            if (!rowKeySet.has(oldKey)) return r;
+            keyMap.set(oldKey, `${sh.shift}-${nextMachineNo}-${i}`);
+            return { ...r, machine_no: nextMachineNo };
+          }),
+        })),
+      },
+    };
+    return { next, keyMap };
+  }
+
+  // 사출계획 그리드에 OCR 결과 머지 — 같은 요일·시프트 셀이면 덮어씀(현장이 최신)
+  function applyOcrToInjection(data, ocrResult, decisions) {
+    const DAY_BY_IDX = ['일', '월', '화', '수', '목', '금', '토'];
+    const dayOf = (iso) => {
+      const d = parseDateLocal(iso);
+      return d ? DAY_BY_IDX[d.getDay()] : null;
+    };
+
+    const requestDate = parseDateLocal(ocrResult.parsed.request_date);
+    const requestDay = requestDate ? DAY_BY_IDX[requestDate.getDay()] : null;
+    let nextDay = dayOf(ocrResult.parsed.next_date);
+    if (!nextDay && requestDate) {
+      const t = new Date(requestDate);
+      t.setDate(t.getDate() + 1);
+      nextDay = DAY_BY_IDX[t.getDay()];
+    }
+    if (!requestDay) {
+      return { error: 'no-request-day' };
+    }
+
+    const newData = { ...data };
+    newData.injection = {};
+    for (const floor of Object.keys(data.injection || {})) {
+      newData.injection[floor] = data.injection[floor].map(m => ({
+        ...m,
+        schedule: Object.fromEntries(
+          Object.entries(m.schedule || {}).map(([d, s]) => [d, { ...s }])
+        ),
+      }));
+    }
+
+    const mergedByShift = { '주간': 0, '야간': 0, '명일주간': 0 };
+    let skippedNoMachine = 0;
+    let skippedNoMatch = 0;
+    const floorMap = { '3F': '3층', '1F': '1층' };
+
+    for (const sheet of ocrResult.parsed.shifts || []) {
+      const targetDay = sheet.shift === '명일주간' ? nextDay : requestDay;
+      const shiftKey = sheet.shift === '야간' ? 'night' : 'day';
+      if (!targetDay) continue;
+
+      for (let i = 0; i < (sheet.rows || []).length; i++) {
+        const r = sheet.rows[i];
+        const rowKey = `${sheet.shift}-${r.machine_no}-${i}`;
+        const decision = decisions[rowKey];
+        if (!decision) { skippedNoMatch++; continue; }
+        if (decision.action === 'skip' && decision.reason !== 'TEST') continue;
+
+        const productName = decision.target || r.product_name;
+        if (!productName) continue;
+
+        const targetFloors = floorMap[r.floor]
+          ? [floorMap[r.floor]]
+          : Object.keys(newData.injection);
+        let found = false;
+        for (const floor of targetFloors) {
+          const list = newData.injection[floor] || [];
+          const machine = list.find(m => machineNoOf(m) === r.machine_no);
+          if (!machine) continue;
+          if (!machine.schedule[targetDay]) machine.schedule[targetDay] = { day: '', night: '' };
+          machine.schedule[targetDay][shiftKey] = productName;
+          mergedByShift[sheet.shift] = (mergedByShift[sheet.shift] || 0) + 1;
+          found = true;
+          break;
+        }
+        if (!found) skippedNoMachine++;
+      }
+    }
+
+    const mergedDays = [...new Set([requestDay, nextDay].filter(Boolean))];
+    return { nextData: newData, mergedByShift, skippedNoMachine, skippedNoMatch, mergedDays };
+  }
+
+  // ── inventory LOT 유효기간 (pages/inventory.jsx 에서 이전) ───────────────────
+
+  // LOT 잔여 유효기간(4일) 계산 — 셀 텍스트·tone·툴팁
+  function inkLifeInfo(lot, baseDate) {
+    const fmtMd = (iso) => {
+      const d = parseDateLocal(iso);
+      return d ? `${d.getMonth() + 1}/${d.getDate()}` : '';
+    };
+    const daysBetween = (fromISO, toISO) => {
+      const from = parseDateLocal(fromISO);
+      const to = parseDateLocal(toISO);
+      if (!from || !to) return null;
+      return Math.round((to - from) / 86400000);
+    };
+    if (!lot || !baseDate) return { text: '-', tone: 'empty', title: '' };
+    const age = daysBetween(lot.registeredDate, baseDate);
+    if (age === null) return { text: '-', tone: 'empty', title: '' };
+    const remaining = 4 - age;
+    if (remaining >= 0) {
+      return {
+        text: `${remaining}일 남음`,
+        tone: remaining <= 1 ? 'warn' : 'ok',
+        title: `LOT 날짜 ${fmtMd(lot.registeredDate)} 기준 · 유효기간 4일`,
+      };
+    }
+    const overdue = Math.abs(remaining);
+    return {
+      text: `${overdue}일 지남`,
+      tone: overdue <= 2 ? 'relabel' : 'expired',
+      title: overdue <= 2
+        ? `LOT 날짜 ${fmtMd(lot.registeredDate)} 기준 · 재라벨 검토 가능`
+        : `LOT 날짜 ${fmtMd(lot.registeredDate)} 기준 · 유효기간 초과`,
+    };
+  }
+
   return {
     getInjectionColumns,
     moveInjectionCell,
@@ -597,5 +1062,29 @@
     removeInventoryInk,
     buildInkMaster,
     isInkInMaster,
+    // 공유 normalize 헬퍼
+    normalizeProductName,
+    normalizeBrand,
+    dayFromDate,
+    inkOfAssignment,
+    // ink-plan 파생 엔진
+    buildProductLookup,
+    resolveProductIn,
+    buildProductsUsingInk,
+    buildDemandByInkDay,
+    buildInkToMachine,
+    buildInventoryByInkDay,
+    mergeInkPlanAndTestInks,
+    computeInkMetrics,
+    buildAutoAssignCandidates,
+    // review / OCR
+    matchOcrRow,
+    buildReviewRows,
+    buildProductGroups,
+    mapOcrRowsInGroup,
+    changeMachineInGroup,
+    applyOcrToInjection,
+    // inventory
+    inkLifeInfo,
   };
 });

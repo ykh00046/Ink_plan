@@ -90,13 +90,9 @@ const Seg = ({ value, onChange, options }) => (
 
 // ── Product name normalization (OCR ↔ master 비교용) ─────────────────────────
 
+// 본체는 data-service.js 로 이전. 기존 글로벌 호출부 호환을 위한 위임 래퍼.
 function normalizeProductName(name) {
-  if (!name) return '';
-  // NFC + 대문자 + 공백/특수문자 제거
-  let s = String(name).normalize('NFC').trim().toUpperCase();
-  s = s.replace(/[_\-\s/\\()（）\[\]【】·・.,，]+/g, '');
-  s = s.replace(/[^\w가-힣%]/g, '');
-  return s;
+  return DataService.normalizeProductName(name);
 }
 
 // ── 공통 상수 ───────────────────────────────────────
@@ -113,11 +109,9 @@ function padInks3(arr) {
   return v.map(x => (x == null || x === '' ? null : x));
 }
 
-// 한국어 요일을 ISO 날짜에서 자동 계산 ('월'~'일'). 잘못된 입력 시 default 반환.
+// 한국어 요일을 ISO 날짜에서 자동 계산 ('월'~'일'). 본체는 data-service.js (위임).
 function dayFromDate(iso, fallback = '월') {
-  const d = parseDateLocal(iso);
-  if (!d) return fallback;
-  return ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+  return DataService.dayFromDate(iso, fallback);
 }
 
 // 제품의 채워진 잉크들 (null 제외)
@@ -125,9 +119,9 @@ function productInks(product) {
   return (product?.inks || []).filter(Boolean);
 }
 
-// machineAssignments record에서 잉크명 추출 (구버전 호환)
+// machineAssignments record에서 잉크명 추출 (구버전 호환). 본체는 data-service.js (위임).
 function inkOfAssignment(a) {
-  return a?.ink || a?.product || a?.name || '';
+  return DataService.inkOfAssignment(a);
 }
 
 // 시스템 날짜에서 "이번 주" 정보 계산.
@@ -167,10 +161,9 @@ function getWeekInfo(now = new Date()) {
   return { today: todayName, dates, isoLabel, monthWeekLabel };
 }
 
-// OCR brand "PIA / 액상" → "PIA" 같이 정규화 (슬래시 앞부분만, 대문자)
+// OCR brand "PIA / 액상" → "PIA" 정규화. 본체는 data-service.js (위임).
 function normalizeBrand(brand) {
-  if (!brand) return '';
-  return String(brand).split('/')[0].trim().toUpperCase();
+  return DataService.normalizeBrand(brand);
 }
 
 // CascadePicker — 브랜드 → 제품 (→ 선택적으로 잉크) 단계별 선택
