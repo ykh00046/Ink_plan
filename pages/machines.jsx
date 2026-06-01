@@ -23,17 +23,17 @@ function MachinesPage({ ctx }) {
   const existingInkNamesNorm = useMemo(() => {
     const s = new Set();
     for (const i of (data.inkPlan || [])) {
-      if (i.name) s.add(i.name.trim().toLowerCase());
+      if (i.name) s.add(DataService.normalizeInkName(i.name));
     }
     for (const a of (data.machineAssignments || [])) {
       const n = inkOfAssignment(a);
-      if (n) s.add(n.trim().toLowerCase());
+      if (n) s.add(DataService.normalizeInkName(n));
     }
     return s;
   }, [data.inkPlan, data.machineAssignments]);
 
   const isDuplicateInk = (name) => {
-    const norm = name.trim().toLowerCase();
+    const norm = DataService.normalizeInkName(name);
     return norm && existingInkNamesNorm.has(norm);
   };
 
@@ -108,8 +108,8 @@ function MachinesPage({ ctx }) {
       { ink: name, machine: machine || '', code },
       ...(newData.machineAssignments || []),
     ];
-    if (!(data.inkPlan || []).some(i => i.name?.trim().toLowerCase() === name.toLowerCase())) {
-      const blank = Object.fromEntries(['월','화','수','목','금','토','일'].map(d => [d, {
+    if (!(data.inkPlan || []).some(i => DataService.normalizeInkName(i.name) === DataService.normalizeInkName(name))) {
+      const blank = Object.fromEntries(WEEKDAYS.map(d => [d, {
         '현재고': null, '가용일수': null, '필요수량': d === '월' ? null : undefined, '제조량': null,
       }]));
       newData.inkPlan = [{ name, days: blank }, ...(newData.inkPlan || [])];

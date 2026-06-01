@@ -67,7 +67,7 @@ function TestInksPage({ ctx }) {
     // Promote to regular ink production plan
     const newData = { ...data };
     newData.testInks = list.filter(x => x !== t);
-    const blank = Object.fromEntries(['월','화','수','목','금','토','일'].map(d => [d, { 현재고: 0, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null, 호기: null }]));
+    const blank = Object.fromEntries(WEEKDAYS.map(d => [d, { 현재고: 0, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null, 호기: null }]));
     newData.inkPlan = [{ name: t.name, days: blank }, ...newData.inkPlan];
     setData(newData);
     notify(`'${t.name}' 정식 잉크로 승격되었습니다`);

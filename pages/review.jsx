@@ -182,12 +182,12 @@ function ReviewPage({ ctx }) {
 
   const knownInkSet = useMemo(() => {
     const s = new Set();
-    for (const v of allInks) s.add(String(v).trim().toLowerCase());
+    for (const v of allInks) s.add(DataService.normalizeInkName(v));
     return s;
   }, [allInks]);
   const findUnknownInks = (inks) => (inks || [])
     .filter(Boolean)
-    .filter(ink => !knownInkSet.has(String(ink).trim().toLowerCase()));
+    .filter(ink => !knownInkSet.has(DataService.normalizeInkName(ink)));
 
   // 마스터의 brand 후보 — 인라인 편집 시 자동완성
   const allBrands = useMemo(() => {
@@ -323,7 +323,7 @@ function ReviewPage({ ctx }) {
     // 잉크 마스터 정본(machineAssignments) + inkPlan 양쪽 기준으로 중복 검사·보충.
     // (P1-2 가드로 미등록 잉크는 차단되지만, 과거 데이터 마이그레이션 등으로
     //  inkPlan에만 있고 machineAssignments엔 없는 잉크가 들어올 가능성을 방어)
-    const norm = (v) => String(v || '').trim().toLowerCase();
+    const norm = DataService.normalizeInkName;
     const existingInPlan = new Set((data.inkPlan || []).map(i => norm(i.name)));
     const existingInAssign = new Set((data.machineAssignments || []).map(a => norm(inkOfAssignment(a))));
     const filledInks = cleanInks.filter(Boolean);

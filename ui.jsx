@@ -96,8 +96,9 @@ function normalizeProductName(name) {
 }
 
 // ── 공통 상수 ───────────────────────────────────────
-const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
-const WEEKDAYS_PLUS = ['월', '화', '수', '목', '금', '토', '일', '차주월'];
+// 요일/교대 상수의 단일 출처는 data-service.js. 기존 글로벌 호출부 호환 위해 위임 참조.
+const WEEKDAYS = DataService.WEEKDAYS;
+const WEEKDAYS_PLUS = DataService.WEEKDAYS_PLUS;
 const INK_DAY_FIELDS = ['현재고', '가용일수', '필요수량', '제조량'];
 
 // ── 공통 헬퍼 ───────────────────────────────────────
@@ -128,9 +129,8 @@ function inkOfAssignment(a) {
 //   - today: 한국어 요일 ('월'~'일') — 토/일이면 그 자체
 //   - dates: { '월': '5/12', '화': '5/13', ..., '일': '5/18', '차주월': '5/19' }
 function getWeekInfo(now = new Date()) {
-  const DAY_BY_IDX = ['일', '월', '화', '수', '목', '금', '토'];
-  const days = ['월', '화', '수', '목', '금', '토', '일'];
-  const todayName = DAY_BY_IDX[now.getDay()];
+  const days = WEEKDAYS;
+  const todayName = DataService.DAY_BY_IDX[now.getDay()];
   // 월요일까지 며칠 빼야 하는가 (일=6, 월=0, 화=1, …, 토=5)
   const offsetToMonday = (now.getDay() + 6) % 7;
   const monday = new Date(now);

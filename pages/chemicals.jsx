@@ -4,11 +4,11 @@
 
 function ChemicalsPage({ ctx }) {
   const { data, notify, today } = ctx;
-  const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
-  const ALL_DAYS = [...WEEK, '차주월'];
+  const WEEK = WEEKDAYS;          // 요일 단일 출처(data-service.js)
+  const ALL_DAYS = WEEKDAYS_PLUS; // +차주월
 
   const [preset, setPreset] = useState('week');
-  const [customDays, setCustomDays] = useState(['월', '화', '수', '목', '금', '토', '일']);
+  const [customDays, setCustomDays] = useState([...WEEKDAYS]); // 변형 가능 seed → spread 복사
   const [shiftMode, setShiftMode] = useState('all'); // 'day' | 'night' | 'all'
   const [floorMode, setFloorMode] = useState('all'); // '3층' | '1층' | 'all'
 
@@ -23,7 +23,7 @@ function ChemicalsPage({ ctx }) {
     }
   }, [preset, customDays, today]);
 
-  const shifts = shiftMode === 'all' ? ['day', 'night'] : [shiftMode];
+  const shifts = shiftMode === 'all' ? DataService.SHIFTS : [shiftMode];
   const floors = floorMode === 'all' ? Object.keys(data.injection || {}) : [floorMode];
 
   const { rows, unmappedProducts } = useMemo(

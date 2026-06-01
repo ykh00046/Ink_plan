@@ -35,12 +35,12 @@ function ProductsPage({ ctx }) {
   // 마스터에 없는 잉크인지 검사 (정규화 비교)
   const knownInkSet = useMemo(() => {
     const s = new Set();
-    for (const v of allInks) s.add(String(v).trim().toLowerCase());
+    for (const v of allInks) s.add(DataService.normalizeInkName(v));
     return s;
   }, [allInks]);
   const findUnknownInks = (inks) => (inks || [])
     .filter(Boolean)
-    .filter(ink => !knownInkSet.has(String(ink).trim().toLowerCase()));
+    .filter(ink => !knownInkSet.has(DataService.normalizeInkName(ink)));
 
   const filtered = useMemo(() => {
     let list = data.products;
@@ -366,9 +366,9 @@ function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factor
   );
 }
 
-// 잉크명 정규화 (마스터 비교용) — 잉크 추가 페이지의 중복 검사와 동일 규칙
+// 잉크명 정규화 (마스터 비교용). 본체는 data-service.js (단일 출처, 위임).
 function normalizeInkName(name) {
-  return String(name || '').trim().toLowerCase();
+  return DataService.normalizeInkName(name);
 }
 
 // 단일 잉크 슬롯 — 제약된 검색 선택기(자유 텍스트 금지).

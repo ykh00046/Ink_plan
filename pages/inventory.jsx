@@ -44,7 +44,7 @@ function invFmtDate(iso) {
 
 function invDayKor(iso) {
   const d = parseDateLocal(iso);
-  return d ? ['일', '월', '화', '수', '목', '금', '토'][d.getDay()] : '';
+  return d ? DataService.DAY_BY_IDX[d.getDay()] : '';
 }
 
 function invDaysBetween(fromISO, toISO) {

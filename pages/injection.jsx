@@ -11,7 +11,7 @@ function InjectionPage({ ctx }) {
   const [editingMaster, setEditingMaster] = useState(null); // {mode: 'add'|'edit', product}
   const [showAlertList, setShowAlertList] = useState(false);
 
-  const days = ['월', '화', '수', '목', '금', '토', '일', '차주월'];
+  const days = WEEKDAYS_PLUS; // 요일 단일 출처(data-service.js)
   // 보이는 요일 (3일/7일)
   const visibleDays = useMemo(() => DataService.getVisibleWeekdays(days, today, dayFilter), [dayFilter, today]);
   const columns = useMemo(() => DataService.getInjectionColumns(visibleDays), [visibleDays]);
@@ -189,7 +189,7 @@ function InjectionPage({ ctx }) {
     for (const fl of Object.keys(data.injection || {})) {
       for (const m of data.injection[fl]) {
         for (const [d, sh] of Object.entries(m.schedule || {})) {
-          for (const sk of ['day', 'night']) {
+          for (const sk of DataService.SHIFTS) {
             const v = sh[sk];
             if (!v || isTestValue(v)) continue;
             const p = resolveProduct(v);

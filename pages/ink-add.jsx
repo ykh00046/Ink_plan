@@ -7,7 +7,7 @@ function InkAddPage({ ctx }) {
   const [search, setSearch] = useState('');
   const [floor, setFloor] = useState('all');
 
-  const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
+  const WEEK = WEEKDAYS; // 요일 단일 출처(data-service.js)
 
   // 집계 대상 = 오늘 주간 + 오늘 야간 + 내일 주간 (INK 요청서 3칸과 동일 범위)
   const targetCells = useMemo(() => {

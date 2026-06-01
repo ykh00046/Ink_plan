@@ -6,7 +6,7 @@
 //   3) InkPlanPage — state · useMemo 체인 · 사출계획·재고와의 양방향 sync · 표 조립
 //   4) 셀 component — InkNameCell · CellNumInput · CellTextInput · InkMachineReadonly
 
-const INKPLAN_DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const INKPLAN_DAYS = DataService.WEEKDAYS; // 요일 단일 출처(data-service.js)
 
 // 같은 컬럼의 다음 row input으로 focus 이동
 function focusNextCellInColumn(currentInput) {

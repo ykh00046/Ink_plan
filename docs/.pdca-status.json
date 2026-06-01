@@ -1,8 +1,8 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-01T05:25:45.312Z",
-  "activeFeatures": ["test-coverage-hardening"],
-  "primaryFeature": "test-coverage-hardening",
+  "lastUpdated": "2026-06-01T07:25:00.000Z",
+  "activeFeatures": ["r3-dedup-unification"],
+  "primaryFeature": "r3-dedup-unification",
   "features": {
     "test-coverage-hardening": {
       "phase": "completed",
@@ -11,6 +11,15 @@
       "design": "docs/02-design/features/test-coverage-hardening.design.md",
       "report": "docs/04-report/test-coverage-hardening.report.md",
       "tests": { "js": 95, "python": 19 }
+    },
+    "r3-dedup-unification": {
+      "phase": "completed",
+      "matchRate": 100,
+      "plan": "docs/01-plan/features/r3-dedup-unification.plan.md",
+      "design": "docs/02-design/features/r3-dedup-unification.design.md",
+      "analysis": "docs/03-analysis/r3-dedup-unification.analysis.md",
+      "report": "docs/04-report/r3-dedup-unification.report.md",
+      "tests": { "js": 99, "python": 19 }
     }
   },
   "pipeline": {
@@ -19,9 +28,20 @@
     "phaseHistory": []
   },
   "session": {
-    "startedAt": "2026-06-01T05:25:45.312Z",
-    "onboardingCompleted": false,
-    "lastActivity": "2026-06-01T05:25:45.312Z"
+    "startedAt": "2026-06-01T07:05:41.119Z",
+    "onboardingCompleted": true,
+    "lastActivity": "2026-06-01T07:25:00.000Z"
   },
-  "history": []
+  "history": [
+    {
+      "feature": "test-coverage-hardening",
+      "completedAt": "2026-06-01T05:25:45.312Z",
+      "matchRate": 100
+    },
+    {
+      "feature": "r3-dedup-unification",
+      "completedAt": "2026-06-01T07:25:00.000Z",
+      "matchRate": 100
+    }
+  ]
 }

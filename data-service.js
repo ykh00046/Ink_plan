@@ -7,6 +7,14 @@
     root.parseDateLocal = service.parseDateLocal;
   }
 })(typeof window !== 'undefined' ? window : globalThis, function () {
+  // ── 도메인 상수 (요일/교대) — 단일 출처 ───────────────────────────────────
+  // 흩어져 있던 요일·교대 매직 배열을 여기로 단일화. 모두 read-only 용도이므로 freeze.
+  // 변형이 필요한 호출부(예: state seed)는 반드시 spread 복사 후 사용할 것.
+  var WEEKDAYS = Object.freeze(['월', '화', '수', '목', '금', '토', '일']);            // 주간 7요일
+  var WEEKDAYS_PLUS = Object.freeze(['월', '화', '수', '목', '금', '토', '일', '차주월']); // +차주월(8)
+  var DAY_BY_IDX = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);          // Date.getDay() 인덱스순
+  var SHIFTS = Object.freeze(['day', 'night']);                                        // 주/야 교대
+
   function getInjectionColumns(days) {
     return days.flatMap(day => [
       { day, shift: 'day', label: '주' },
@@ -94,9 +102,8 @@
   //   - 잉크가 1개도 매핑 안 된 제품은 unmappedProducts 부산물로 알림
   function aggregateChemicalRequest(data, opts) {
     const o = opts || {};
-    const allDays = ['월','화','수','목','금','토','일','차주월'];
-    const days = (o.days && o.days.length) ? o.days : allDays;
-    const shifts = (o.shifts && o.shifts.length) ? o.shifts : ['day', 'night'];
+    const days = (o.days && o.days.length) ? o.days : WEEKDAYS_PLUS;
+    const shifts = (o.shifts && o.shifts.length) ? o.shifts : SHIFTS;
     const injection = data?.injection || {};
     const floors = (o.floors && o.floors.length) ? o.floors : Object.keys(injection);
 
@@ -550,11 +557,17 @@
   // 잉크 마스터(정본 목록): machineAssignments + inkPlan + products[].inks 합집합.
   // 정규화(trim+lowercase) 후 dedup, 표시명은 첫 발견 원형 유지, 정렬 반환.
   // ui.jsx의 inkOfAssignment 규칙(a.ink || a.product || a.name)을 내장 — 순수 계층은 ui.jsx 의존 불가.
+  // 잉크명 식별 정규화 (마스터 비교·dedup용): null-safe + trim + lowercase.
+  // 잉크명 동일성 판정의 단일 출처 — products.jsx·review.jsx·내부 마스터 빌더가 모두 위임.
+  function normalizeInkName(name) {
+    return String(name == null ? '' : name).trim().toLowerCase();
+  }
+
   function buildInkMaster(data) {
     const map = new Map();
     const add = (raw) => {
       if (!raw) return;
-      const norm = String(raw).trim().toLowerCase();
+      const norm = normalizeInkName(raw);
       if (norm && !map.has(norm)) map.set(norm, raw);
     };
     const d = data || {};
@@ -566,9 +579,9 @@
 
   // 잉크명이 마스터 목록에 있는지 정규화 비교.
   function isInkInMaster(name, master) {
-    const norm = String(name == null ? '' : name).trim().toLowerCase();
+    const norm = normalizeInkName(name);
     if (!norm) return false;
-    return (master || []).some(m => String(m == null ? '' : m).trim().toLowerCase() === norm);
+    return (master || []).some(m => normalizeInkName(m) === norm);
   }
 
   // ── CascadePicker 파생 순수 함수 (ui.jsx 위임, 동작 보존) ───────────────────
@@ -621,7 +634,7 @@
   function dayFromDate(iso, fallback = '월') {
     const d = parseDateLocal(iso);
     if (!d) return fallback;
-    return ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+    return DAY_BY_IDX[d.getDay()];
   }
 
   // machineAssignments record에서 잉크명 추출 (구버전 호환)
@@ -959,7 +972,6 @@
 
   // 사출계획 그리드에 OCR 결과 머지 — 같은 요일·시프트 셀이면 덮어씀(현장이 최신)
   function applyOcrToInjection(data, ocrResult, decisions) {
-    const DAY_BY_IDX = ['일', '월', '화', '수', '목', '금', '토'];
     const dayOf = (iso) => {
       const d = parseDateLocal(iso);
       return d ? DAY_BY_IDX[d.getDay()] : null;
@@ -1091,6 +1103,7 @@
     removeInventoryInk,
     buildInkMaster,
     isInkInMaster,
+    normalizeInkName,
     buildCascadeBrands,
     cascadeProductsInBrand,
     cascadeInksInProduct,
@@ -1119,5 +1132,10 @@
     applyOcrToInjection,
     // inventory
     inkLifeInfo,
+    // 도메인 상수 (요일/교대) — 단일 출처
+    WEEKDAYS,
+    WEEKDAYS_PLUS,
+    DAY_BY_IDX,
+    SHIFTS,
   };
 });
