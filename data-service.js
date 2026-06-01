@@ -571,6 +571,35 @@
     return (master || []).some(m => String(m == null ? '' : m).trim().toLowerCase() === norm);
   }
 
+  // ── CascadePicker 파생 순수 함수 (ui.jsx 위임, 동작 보존) ───────────────────
+  // 브랜드 컬럼: brand 필드 있는 제품만 Set dedup 후 정렬.
+  function buildCascadeBrands(products) {
+    const s = new Set();
+    for (const p of (products || [])) if (p && p.brand) s.add(p.brand);
+    return Array.from(s).sort();
+  }
+
+  // 제품 컬럼: brand falsy면 빈 배열, 아니면 해당 brand 제품만.
+  function cascadeProductsInBrand(products, brand) {
+    if (!brand) return [];
+    return (products || []).filter(p => p && p.brand === brand);
+  }
+
+  // 잉크 컬럼: name falsy면 빈 배열, 아니면 해당 제품 inks 중 truthy만.
+  function cascadeInksInProduct(products, name) {
+    if (!name) return [];
+    const p = (products || []).find(x => x && x.name === name);
+    return ((p && p.inks) || []).filter(Boolean);
+  }
+
+  // 검색 필터: query trim/소문자 후 keyFn(item) 부분일치. 빈 query면 원본 그대로.
+  function filterByQuery(items, query, keyFn) {
+    const q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q) return items || [];
+    const key = keyFn || (x => x);
+    return (items || []).filter(it => String(key(it) == null ? '' : key(it)).toLowerCase().includes(q));
+  }
+
   // ── 공유 normalize 헬퍼 (ui.jsx 에서 위임) ──────────────────────────────────
 
   // 제품명 정규화 (OCR ↔ master 비교용): NFC + 대문자 + 공백/특수문자 제거
@@ -1062,6 +1091,10 @@
     removeInventoryInk,
     buildInkMaster,
     isInkInMaster,
+    buildCascadeBrands,
+    cascadeProductsInBrand,
+    cascadeInksInProduct,
+    filterByQuery,
     // 공유 normalize 헬퍼
     normalizeProductName,
     normalizeBrand,

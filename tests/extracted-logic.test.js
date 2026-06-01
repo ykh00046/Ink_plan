@@ -1,0 +1,276 @@
+// R3-1순위: 페이지에서 data-service.js로 이전된 파생 함수의 단위 테스트.
+// ink-plan 엔진(9) · review/OCR(6) · inventory(1) + 공유 normalize 위임 검증.
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const DataService = require('../data-service.js');
+
+// ── ink-plan: buildProductLookup / resolveProductIn ──────────────────────────
+test('buildProductLookup: exact·normalized 맵을 모두 구성한다', () => {
+  const lookup = DataService.buildProductLookup([
+    { name: 'A-100', inks: ['빨강'] },
+    { name: 'B 200', inks: ['파랑'] },
+  ]);
+  assert.equal(lookup.exact.get('A-100').name, 'A-100');
+  // 정규화 키는 구분자/공백 제거 + 대문자
+  assert.equal(lookup.normalized.get('A100').name, 'A-100');
+  assert.equal(lookup.normalized.get('B200').name, 'B 200');
+});
+
+test('resolveProductIn: exact 우선, 없으면 normalized, 둘 다 없으면 null', () => {
+  const lookup = DataService.buildProductLookup([{ name: 'A-100', inks: ['빨강'] }]);
+  assert.equal(DataService.resolveProductIn(lookup, 'A-100').name, 'A-100'); // exact
+  assert.equal(DataService.resolveProductIn(lookup, 'a 100').name, 'A-100'); // normalized
+  assert.equal(DataService.resolveProductIn(lookup, '없는제품'), null);
+  assert.equal(DataService.resolveProductIn(lookup, ''), null);
+});
+
+// ── ink-plan: buildProductsUsingInk / buildDemandByInkDay ────────────────────
+const SAMPLE_INJECTION = {
+  '3층': [
+    { machine: '1호', schedule: { 월: { day: 'A-100', night: 'B-200' }, 화: { day: 'A-100', night: '' } } },
+  ],
+};
+
+test('buildProductsUsingInk: 잉크 → 사용 제품명 목록(중복 제거)', () => {
+  const lookup = DataService.buildProductLookup([
+    { name: 'A-100', inks: ['빨강', '공통'] },
+    { name: 'B-200', inks: ['파랑', '공통'] },
+  ]);
+  const map = DataService.buildProductsUsingInk(SAMPLE_INJECTION, lookup);
+  assert.deepEqual(map.get('빨강'), ['A-100']);
+  assert.deepEqual(map.get('파랑'), ['B-200']);
+  assert.deepEqual(map.get('공통').sort(), ['A-100', 'B-200']);
+});
+
+test('buildDemandByInkDay: 잉크 × 요일 → 채워진 셀 수 집계', () => {
+  const lookup = DataService.buildProductLookup([
+    { name: 'A-100', inks: ['빨강'] },
+    { name: 'B-200', inks: ['파랑'] },
+  ]);
+  const demand = DataService.buildDemandByInkDay(SAMPLE_INJECTION, lookup);
+  // 빨강: 월 day + 화 day = 월1, 화1
+  assert.equal(demand.get('빨강').get('월'), 1);
+  assert.equal(demand.get('빨강').get('화'), 1);
+  // 파랑: 월 night 1회만
+  assert.equal(demand.get('파랑').get('월'), 1);
+  assert.equal(demand.get('파랑').get('화'), undefined);
+});
+
+test('buildProductsUsingInk: 빈 injection은 빈 맵', () => {
+  const lookup = DataService.buildProductLookup([]);
+  assert.equal(DataService.buildProductsUsingInk({}, lookup).size, 0);
+  assert.equal(DataService.buildProductsUsingInk(null, lookup).size, 0);
+});
+
+// ── ink-plan: buildInkToMachine ──────────────────────────────────────────────
+test('buildInkToMachine: 잉크 → 호기 (첫 매핑 유지, 구버전 키 호환)', () => {
+  const m = DataService.buildInkToMachine([
+    { ink: '빨강', machine: '1호' },
+    { ink: '빨강', machine: '2호' }, // 첫 매핑 유지
+    { product: '파랑', machine: '3호' }, // 구버전 product 키
+    { name: '노랑', machine: '4호' },    // 구버전 name 키
+  ]);
+  assert.equal(m.get('빨강'), '1호');
+  assert.equal(m.get('파랑'), '3호');
+  assert.equal(m.get('노랑'), '4호');
+});
+
+// ── ink-plan: buildInventoryByInkDay ─────────────────────────────────────────
+test('buildInventoryByInkDay: 일자별 lot 재고를 요일 키로 합산', () => {
+  const inventory = {
+    lots: [
+      { id: 'L1', ink: '빨강' },
+      { id: 'L2', ink: '빨강' },
+    ],
+    daily: {
+      '2026-06-01': { L1: 10, L2: 5 },
+      '2026-06-02': { L1: 3 },
+    },
+  };
+  // 2026-06-01 = 월(6/1), 2026-06-02 = 화(6/2)
+  const dates = { 월: '6/1', 화: '6/2' };
+  const res = DataService.buildInventoryByInkDay(inventory, dates);
+  assert.equal(res.get('빨강').get('월'), 15);
+  assert.equal(res.get('빨강').get('화'), 3);
+});
+
+test('buildInventoryByInkDay: lots/daily 없으면 빈 맵', () => {
+  assert.equal(DataService.buildInventoryByInkDay(null, {}).size, 0);
+  assert.equal(DataService.buildInventoryByInkDay({ lots: [] }, {}).size, 0);
+});
+
+// ── ink-plan: mergeInkPlanAndTestInks ────────────────────────────────────────
+test('mergeInkPlanAndTestInks: 정식 유지 + testStatus 칩, 미등록 testInk는 추가', () => {
+  const days = ['월', '화'];
+  const merged = DataService.mergeInkPlanAndTestInks(
+    [{ name: '빨강', days: {} }],
+    [
+      { name: '빨강', status: '테스트중', note: '메모', addedDate: '2026-06-01' },
+      { name: '신규', status: '대기', note: '', addedDate: '2026-06-01' },
+    ],
+    days,
+  );
+  const red = merged.find(m => m.name === '빨강');
+  assert.equal(red.isTest, false);
+  assert.equal(red.testStatus, '테스트중');
+  assert.equal(red.testNote, '메모');
+  const neo = merged.find(m => m.name === '신규');
+  assert.equal(neo.isTest, true);
+  assert.deepEqual(Object.keys(neo.days), ['월', '화']);
+});
+
+// ── ink-plan: computeInkMetrics ──────────────────────────────────────────────
+test('computeInkMetrics: 수동 현재고 우선 + endStock carry 전파', () => {
+  const days = ['월', '화'];
+  const merged = [{ name: '빨강', days: { 월: { 현재고: '10', 제조량: '5' }, 화: {} } }];
+  const demand = new Map([['빨강', new Map([['월', 2], ['화', 3]])]]);
+  const inv = new Map();
+  const res = DataService.computeInkMetrics(merged, demand, inv, days);
+  const mon = res.get('빨강').get('월');
+  assert.equal(mon.stock, 10);       // 수동값
+  assert.equal(mon.required, 2);
+  assert.equal(mon.manufacture, 5);
+  // endStock = 10 + 5 - 2 = 13 → 화 stock으로 carry
+  const tue = res.get('빨강').get('화');
+  assert.equal(tue.stock, 13);
+  assert.equal(tue.required, 3);
+});
+
+test('computeInkMetrics: inventory 연동값은 stockFromInv=true', () => {
+  const days = ['월'];
+  const merged = [{ name: '빨강', days: { 월: {} } }];
+  const demand = new Map();
+  const inv = new Map([['빨강', new Map([['월', 7]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, inv, days);
+  const mon = res.get('빨강').get('월');
+  assert.equal(mon.stock, 7);
+  assert.equal(mon.stockFromInv, true);
+});
+
+// ── ink-plan: buildAutoAssignCandidates ──────────────────────────────────────
+test('buildAutoAssignCandidates: 제조량 비어있고 월 weeklyNeed 음수면 후보', () => {
+  const days = ['월', '화'];
+  const inkPlan = [
+    { name: '부족', days: { 월: {} } },
+    { name: '충분', days: { 월: {} } },
+    { name: '이미입력', days: { 월: { 제조량: '5' } } },
+  ];
+  const computed = new Map([
+    ['부족', new Map([['월', { weeklyNeed: -8 }]])],
+    ['충분', new Map([['월', { weeklyNeed: 3 }]])],
+    ['이미입력', new Map([['월', { weeklyNeed: -2 }]])],
+  ]);
+  const out = DataService.buildAutoAssignCandidates(inkPlan, [], '월', days, computed);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0], { name: '부족', need: -8, suggested: 8 });
+});
+
+// ── review/OCR: matchOcrRow ──────────────────────────────────────────────────
+const MASTER = {
+  products: [
+    { name: 'A-100', customer: '고객사' },
+    { name: 'B-200', customer: '갑' },
+    { name: 'B-200', customer: '을' },
+  ],
+};
+
+test('matchOcrRow: 이름+브랜드 일치 → exact', () => {
+  const r = DataService.matchOcrRow({ product_name: 'A-100', brand: '고객사' }, MASTER);
+  assert.equal(r.status, 'exact');
+  assert.equal(r.matchedName, 'A-100');
+});
+
+test('matchOcrRow: 이름 1건이지만 브랜드 불일치 → brand-mismatch', () => {
+  const r = DataService.matchOcrRow({ product_name: 'A-100', brand: '딴고객' }, MASTER);
+  assert.equal(r.status, 'brand-mismatch');
+  assert.equal(r.suggestedBrand, '고객사');
+});
+
+test('matchOcrRow: 동명 제품 여러 건 → none(candidates 제공)', () => {
+  const r = DataService.matchOcrRow({ product_name: 'B-200', brand: '병' }, MASTER);
+  assert.equal(r.status, 'none');
+  assert.equal(r.candidates.length, 2);
+});
+
+test('matchOcrRow: 빈 이름 또는 TEST → skip', () => {
+  assert.equal(DataService.matchOcrRow({ product_name: '' }, MASTER).status, 'skip');
+  assert.equal(DataService.matchOcrRow({ product_name: 'TEST' }, MASTER).status, 'skip');
+});
+
+// ── review/OCR: buildReviewRows / buildProductGroups ─────────────────────────
+const OCR_RESULT = {
+  parsed: {
+    shifts: [
+      { shift: '주', rows: [
+        { machine_no: '1', product_name: 'A-100', brand: '고객사', floor: '3층' },
+        { machine_no: '2', product_name: 'A-100', brand: '고객사', floor: '3층' },
+      ] },
+    ],
+  },
+};
+
+test('buildReviewRows: shifts → flat rows with rowKey + match', () => {
+  const rows = DataService.buildReviewRows(OCR_RESULT, MASTER);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].rowKey, '주-1-0');
+  assert.equal(rows[0].status, 'exact');
+});
+
+test('buildReviewRows: parsed 없으면 빈 배열', () => {
+  assert.deepEqual(DataService.buildReviewRows({}, MASTER), []);
+});
+
+test('buildProductGroups: 동일 제품+브랜드는 한 그룹으로 묶임', () => {
+  const rows = DataService.buildReviewRows(OCR_RESULT, MASTER);
+  const groups = DataService.buildProductGroups(rows);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].rowKeys.length, 2);
+  assert.equal(groups[0].occurs.length, 2);
+});
+
+// ── review/OCR: mapOcrRowsInGroup / changeMachineInGroup ─────────────────────
+test('mapOcrRowsInGroup: 지정 rowKey의 필드만 변경(불변성 유지)', () => {
+  const next = DataService.mapOcrRowsInGroup(OCR_RESULT, ['주-1-0'], 'brand', '새브랜드');
+  assert.equal(next.parsed.shifts[0].rows[0].brand, '새브랜드');
+  assert.equal(next.parsed.shifts[0].rows[1].brand, '고객사'); // 미지정 행 불변
+  assert.notEqual(next, OCR_RESULT); // 새 객체
+});
+
+test('changeMachineInGroup: 호기 변경 + keyMap(old→new) 반환', () => {
+  const { next, keyMap } = DataService.changeMachineInGroup(OCR_RESULT, ['주-1-0'], '9');
+  assert.equal(next.parsed.shifts[0].rows[0].machine_no, '9');
+  assert.equal(keyMap.get('주-1-0'), '주-9-0');
+});
+
+// ── inventory: inkLifeInfo ───────────────────────────────────────────────────
+test('inkLifeInfo: 유효기간 4일 내 → 남음, tone ok/warn', () => {
+  const r = DataService.inkLifeInfo({ registeredDate: '2026-06-01' }, '2026-06-02');
+  assert.equal(r.text, '3일 남음'); // 4 - 1
+  assert.equal(r.tone, 'ok');
+  const warn = DataService.inkLifeInfo({ registeredDate: '2026-06-01' }, '2026-06-04');
+  assert.equal(warn.text, '1일 남음'); // 4 - 3
+  assert.equal(warn.tone, 'warn');     // remaining <= 1
+});
+
+test('inkLifeInfo: 초과 → 지남, 2일 이내는 relabel, 그 이상 expired', () => {
+  const relabel = DataService.inkLifeInfo({ registeredDate: '2026-06-01' }, '2026-06-06');
+  assert.equal(relabel.text, '1일 지남'); // age 5, remaining -1
+  assert.equal(relabel.tone, 'relabel');
+  const expired = DataService.inkLifeInfo({ registeredDate: '2026-06-01' }, '2026-06-09');
+  assert.equal(expired.text, '4일 지남'); // age 8, remaining -4
+  assert.equal(expired.tone, 'expired');
+});
+
+test('inkLifeInfo: 입력 없으면 empty', () => {
+  assert.equal(DataService.inkLifeInfo(null, '2026-06-01').tone, 'empty');
+  assert.equal(DataService.inkLifeInfo({}, null).tone, 'empty');
+});
+
+// ── 공유 normalize 위임 (ui.jsx → data-service) ──────────────────────────────
+test('normalize 헬퍼: 단일화된 동작 검증', () => {
+  assert.equal(DataService.normalizeProductName(' a-100 '), 'A100');
+  assert.equal(DataService.normalizeBrand('갑/을'), '갑'); // 슬래시 앞부분
+  assert.equal(DataService.inkOfAssignment({ ink: '빨강' }), '빨강');
+  assert.equal(DataService.inkOfAssignment({ product: '파랑' }), '파랑');
+});

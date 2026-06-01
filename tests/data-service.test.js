@@ -431,3 +431,55 @@ test('isInkInMaster: 정규화 매칭 / 미존재 / 빈 입력', () => {
   assert.equal(DataService.isInkInMaster(null, master), false);
   assert.equal(DataService.isInkInMaster('Blue', []), false);
 });
+
+// ── CascadePicker 파생 순수 함수 (ui.jsx 위임 로직) ─────────────────────────
+
+test('buildCascadeBrands: brand 있는 제품만 dedup + 정렬', () => {
+  const products = [
+    { name: 'p1', brand: 'PIA' },
+    { name: 'p2', brand: 'AQUA' },
+    { name: 'p3', brand: 'PIA' },   // 중복 브랜드
+    { name: 'p4' },                  // brand 없음 → 제외
+    { name: 'p5', brand: '' },       // 빈 brand → 제외
+  ];
+  assert.deepEqual(DataService.buildCascadeBrands(products), ['AQUA', 'PIA']);
+});
+
+test('buildCascadeBrands: 빈/누락 입력은 빈 배열', () => {
+  assert.deepEqual(DataService.buildCascadeBrands([]), []);
+  assert.deepEqual(DataService.buildCascadeBrands(undefined), []);
+  assert.deepEqual(DataService.buildCascadeBrands([null, { name: 'x' }]), []);
+});
+
+test('cascadeProductsInBrand: brand 매칭 / 빈·미존재 brand는 빈 배열', () => {
+  const products = [
+    { name: 'p1', brand: 'PIA' },
+    { name: 'p2', brand: 'AQUA' },
+    { name: 'p3', brand: 'PIA' },
+  ];
+  assert.deepEqual(DataService.cascadeProductsInBrand(products, 'PIA').map(p => p.name), ['p1', 'p3']);
+  assert.deepEqual(DataService.cascadeProductsInBrand(products, ''), []);
+  assert.deepEqual(DataService.cascadeProductsInBrand(products, 'NONE'), []);
+  assert.deepEqual(DataService.cascadeProductsInBrand(undefined, 'PIA'), []);
+});
+
+test('cascadeInksInProduct: 제품 잉크 truthy 필터 / 빈·미존재 name은 빈 배열', () => {
+  const products = [
+    { name: 'p1', inks: ['1도', null, '2도', '', '3도'] },
+    { name: 'p2', inks: [] },
+    { name: 'p3' },
+  ];
+  assert.deepEqual(DataService.cascadeInksInProduct(products, 'p1'), ['1도', '2도', '3도']);
+  assert.deepEqual(DataService.cascadeInksInProduct(products, 'p2'), []);
+  assert.deepEqual(DataService.cascadeInksInProduct(products, 'p3'), []);
+  assert.deepEqual(DataService.cascadeInksInProduct(products, ''), []);
+  assert.deepEqual(DataService.cascadeInksInProduct(products, 'NONE'), []);
+});
+
+test('filterByQuery: 대소문자/공백 무시 부분일치, 빈 query는 원본', () => {
+  const items = [{ name: 'Red Ink' }, { name: 'Blue' }, { name: 'redder' }];
+  assert.deepEqual(DataService.filterByQuery(items, '  RED ', p => p.name).map(p => p.name), ['Red Ink', 'redder']);
+  assert.deepEqual(DataService.filterByQuery(items, '', p => p.name), items);
+  assert.deepEqual(DataService.filterByQuery(['A', 'b', 'C'], 'c', x => x), ['C']);
+  assert.deepEqual(DataService.filterByQuery(undefined, 'x', x => x), []);
+});

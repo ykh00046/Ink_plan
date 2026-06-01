@@ -153,3 +153,64 @@ test('relabel belongs only to its original lot row', () => {
   assert.equal(DataService.actualInventoryLotForInitial(next.lots, next.lots[0], '2026-05-17').lotNo, 'SOUL051702');
   assert.equal(DataService.actualInventoryLotForInitial(next.lots, next.lots[1], '2026-05-17').lotNo, 'SOUL051701');
 });
+
+// ── 재고 lot 변형 엣지케이스 (happy-path 보완) ─────────────────────────────
+
+test('removeInventoryLot: 부모 lot 삭제 시 relabel 자식 lot까지 cascade 제거', () => {
+  const inv = {
+    lots: [
+      { id: 'L1', ink: 'A', lotNo: 'A051301', role: 'initial', order: 1 },
+      { id: 'R1', ink: 'A', lotNo: 'A051402', role: 'relabel', order: 2, parentId: 'L1' },
+      { id: 'L2', ink: 'B', lotNo: 'B051301', role: 'initial', order: 1 },
+    ],
+    daily: {
+      '2026-05-14': { L1: 3, R1: 5, L2: 9 },
+    },
+  };
+
+  const next = DataService.removeInventoryLot(inv, 'L1');
+  assert.deepEqual(next.lots.map(l => l.id), ['L2']);
+  assert.deepEqual(next.daily, { '2026-05-14': { L2: 9 } });
+});
+
+test('removeInventoryLot: order 배열에서도 제거 id를 정리해 보존', () => {
+  const inv = {
+    lots: [
+      { id: 'L1', ink: 'A', lotNo: 'A051301' },
+      { id: 'R1', ink: 'A', lotNo: 'A051402', parentId: 'L1' },
+      { id: 'L2', ink: 'B', lotNo: 'B051301' },
+    ],
+    daily: {},
+    order: ['L2', 'L1', 'R1'],
+  };
+
+  assert.deepEqual(DataService.removeInventoryLot(inv, 'L1').order, ['L2']);
+});
+
+test('removeInventoryLot: 미존재 lotId는 변동 없음(idempotent)', () => {
+  const inv = {
+    lots: [{ id: 'L1', ink: 'A', lotNo: 'A051301' }],
+    daily: { '2026-05-13': { L1: 2 } },
+  };
+
+  const next = DataService.removeInventoryLot(inv, 'NOPE');
+  assert.deepEqual(next.lots, inv.lots);
+  assert.deepEqual(next.daily, { '2026-05-13': { L1: 2 } });
+});
+
+test('removeInventoryLot / removeInventoryInk: null inventory도 안전하게 빈 구조 반환', () => {
+  assert.deepEqual(DataService.removeInventoryLot(null, 'X'), { lots: [], daily: {} });
+  assert.deepEqual(DataService.removeInventoryInk(undefined, 'A'), { lots: [], daily: {} });
+});
+
+test('relabelInventoryLot: order>3 상한 — 3번째 이후 relabel은 무변동', () => {
+  const inv = { lots: [{ id: 'L1', ink: 'SHADOW', lotNo: 'SHAD051001', role: 'initial', order: 1 }], daily: {} };
+
+  let cur = DataService.relabelInventoryLot(inv, 'SHADOW', '2026-05-14', () => 'R1'); // order 2
+  cur = DataService.relabelInventoryLot(cur, 'SHADOW', '2026-05-14', () => 'R2');     // order 3
+  assert.equal(cur.lots.length, 3);
+
+  const capped = DataService.relabelInventoryLot(cur, 'SHADOW', '2026-05-14', () => 'R3'); // order 4 → 거부
+  assert.equal(capped.lots.length, 3);
+  assert.deepEqual(capped.lots.map(l => l.id), ['L1', 'R1', 'R2']);
+});

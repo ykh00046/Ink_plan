@@ -188,32 +188,16 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
   const [brandSearch, setBrandSearch] = React.useState('');
   const [productSearch, setProductSearch] = React.useState('');
 
-  const brands = React.useMemo(() => {
-    const s = new Set();
-    for (const p of products) if (p.brand) s.add(p.brand);
-    return Array.from(s).sort();
-  }, [products]);
+  // 파생 로직은 DataService 순수 함수에 위임 (단위 테스트 대상)
+  const brands = React.useMemo(() => DataService.buildCascadeBrands(products), [products]);
 
-  const productsInBrand = React.useMemo(() => {
-    if (!brand) return [];
-    return products.filter(p => p.brand === brand);
-  }, [brand, products]);
+  const productsInBrand = React.useMemo(() => DataService.cascadeProductsInBrand(products, brand), [brand, products]);
 
-  const inksInProduct = React.useMemo(() => {
-    if (!productName) return [];
-    const p = products.find(x => x.name === productName);
-    return (p?.inks || []).filter(Boolean);
-  }, [productName, products]);
+  const inksInProduct = React.useMemo(() => DataService.cascadeInksInProduct(products, productName), [productName, products]);
 
-  const visibleBrands = React.useMemo(() => {
-    const q = brandSearch.trim().toLowerCase();
-    return q ? brands.filter(b => b.toLowerCase().includes(q)) : brands;
-  }, [brands, brandSearch]);
+  const visibleBrands = React.useMemo(() => DataService.filterByQuery(brands, brandSearch, b => b), [brands, brandSearch]);
 
-  const visibleProducts = React.useMemo(() => {
-    const q = productSearch.trim().toLowerCase();
-    return q ? productsInBrand.filter(p => p.name.toLowerCase().includes(q)) : productsInBrand;
-  }, [productsInBrand, productSearch]);
+  const visibleProducts = React.useMemo(() => DataService.filterByQuery(productsInBrand, productSearch, p => p.name), [productsInBrand, productSearch]);
 
   const pickProduct = (p) => {
     if (mode === 'product') {

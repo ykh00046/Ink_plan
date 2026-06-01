@@ -54,28 +54,8 @@ function invDaysBetween(fromISO, toISO) {
   return Math.round((to - from) / 86400000);
 }
 
-// LOT 잔여 유효기간(4일) 계산 — 셀 텍스트·tone·툴팁
-function invInkLifeInfo(lot, baseDate) {
-  if (!lot || !baseDate) return { text: '-', tone: 'empty', title: '' };
-  const age = invDaysBetween(lot.registeredDate, baseDate);
-  if (age === null) return { text: '-', tone: 'empty', title: '' };
-  const remaining = 4 - age;
-  if (remaining >= 0) {
-    return {
-      text: `${remaining}일 남음`,
-      tone: remaining <= 1 ? 'warn' : 'ok',
-      title: `LOT 날짜 ${invFmtDate(lot.registeredDate)} 기준 · 유효기간 4일`,
-    };
-  }
-  const overdue = Math.abs(remaining);
-  return {
-    text: `${overdue}일 지남`,
-    tone: overdue <= 2 ? 'relabel' : 'expired',
-    title: overdue <= 2
-      ? `LOT 날짜 ${invFmtDate(lot.registeredDate)} 기준 · 재라벨 검토 가능`
-      : `LOT 날짜 ${invFmtDate(lot.registeredDate)} 기준 · 유효기간 초과`,
-  };
-}
+// LOT 잔여 유효기간 계산은 data-service.js로 이전됨 (R3-1순위)
+const invInkLifeInfo = DataService.inkLifeInfo;
 
 // 입력 셀 안에서 다음 input으로 focus 이동. cell 내부 input 먼저, 없으면 같은 컬럼의 다음 행.
 function invFocusNextInCol(input) {

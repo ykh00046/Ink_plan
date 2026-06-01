@@ -1,26 +1,16 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-05-29T00:00:00.000Z",
-  "activeFeatures": [],
-  "primaryFeature": null,
+  "lastUpdated": "2026-06-01T05:25:45.312Z",
+  "activeFeatures": ["test-coverage-hardening"],
+  "primaryFeature": "test-coverage-hardening",
   "features": {
-    "약품요청서": {
-      "phase": "archived",
-      "matchRate": 95,
-      "archivedTo": "docs/archive/2026-05/약품요청서/",
-      "archivedAt": "2026-05-29"
-    },
-    "마스터-정합성": {
-      "phase": "archived",
-      "matchRate": 95,
-      "archivedTo": "docs/archive/2026-05/마스터-정합성/",
-      "archivedAt": "2026-05-29"
-    },
-    "잉크-cascade-선택": {
-      "phase": "archived",
-      "matchRate": 95,
-      "archivedTo": "docs/archive/2026-05/잉크-cascade-선택/",
-      "archivedAt": "2026-05-29"
+    "test-coverage-hardening": {
+      "phase": "completed",
+      "matchRate": 100,
+      "plan": "docs/01-plan/features/test-coverage-hardening.plan.md",
+      "design": "docs/02-design/features/test-coverage-hardening.design.md",
+      "report": "docs/04-report/test-coverage-hardening.report.md",
+      "tests": { "js": 95, "python": 19 }
     }
   },
   "pipeline": {
@@ -29,28 +19,9 @@
     "phaseHistory": []
   },
   "session": {
-    "startedAt": "2026-05-13T03:29:18.957Z",
+    "startedAt": "2026-06-01T05:25:45.312Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-05-29T00:00:00.000Z"
+    "lastActivity": "2026-06-01T05:25:45.312Z"
   },
-  "history": [
-    {
-      "feature": "잉크-cascade-선택",
-      "event": "archived",
-      "at": "2026-05-29",
-      "archivedTo": "docs/archive/2026-05/잉크-cascade-선택/"
-    },
-    {
-      "feature": "약품요청서",
-      "event": "archived",
-      "at": "2026-05-29",
-      "archivedTo": "docs/archive/2026-05/약품요청서/"
-    },
-    {
-      "feature": "마스터-정합성",
-      "event": "archived",
-      "at": "2026-05-29",
-      "archivedTo": "docs/archive/2026-05/마스터-정합성/"
-    }
-  ]
+  "history": []
 }

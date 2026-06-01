@@ -60,3 +60,14 @@
 - 3개 페이지가 `DataService.*` 또는 alias로만 순수 로직 호출
 - ui.jsx normalize 헬퍼가 data-service 위임
 - Gap 분석 ≥ 90%, 완료 보고서 작성
+
+---
+
+## 7. R3 진행 기록 (2026-06-01)
+
+이전 세션(wip 53f37e8)에서 **함수 이전 + ui.jsx 위임(D1·D2)까지 완료**됐으나,
+페이지의 inline 정의가 그대로 남아 **중복 상태**로 미완료. R3에서 D3(페이지 alias 교체)
++ 단위 테스트 + Check + Report로 사이클을 종결한다.
+
+- 검증 완료: 페이지 inline 본문 vs data-service 추출본 = **로직 동일**(주석만 상이)
+- 잔여 작업: ink-plan 9 / review 6 / inventory 1 함수의 페이지 정의 → DataService alias
