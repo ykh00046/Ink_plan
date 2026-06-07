@@ -125,40 +125,10 @@ function inkOfAssignment(a) {
   return DataService.inkOfAssignment(a);
 }
 
-// 시스템 날짜에서 "이번 주" 정보 계산.
-//   - today: 한국어 요일 ('월'~'일') — 토/일이면 그 자체
-//   - dates: { '월': '5/12', '화': '5/13', ..., '일': '5/18', '차주월': '5/19' }
+// 시스템 날짜에서 "이번 주" 정보 계산. 본체는 data-service.js (위임).
+//   반환: { today:'월'~'일', dates:{요일→'M/D', 차주월}, isoLabel:'YYYY-Www', monthWeekLabel:'n월 n주차' }
 function getWeekInfo(now = new Date()) {
-  const days = WEEKDAYS;
-  const todayName = DataService.DAY_BY_IDX[now.getDay()];
-  // 월요일까지 며칠 빼야 하는가 (일=6, 월=0, 화=1, …, 토=5)
-  const offsetToMonday = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(now.getDate() - offsetToMonday);
-  const dates = {};
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    dates[days[i]] = `${d.getMonth() + 1}/${d.getDate()}`;
-  }
-  const nextMon = new Date(monday);
-  nextMon.setDate(monday.getDate() + 7);
-  dates['차주월'] = `${nextMon.getMonth() + 1}/${nextMon.getDate()}`;
-
-  // ISO 8601 주차 (그 주 목요일이 속한 해 기준)
-  const thursday = new Date(monday);
-  thursday.setDate(monday.getDate() + 3);
-  const isoYear = thursday.getFullYear();
-  const yearStart = new Date(isoYear, 0, 1);
-  const isoWeek = Math.ceil(((thursday - yearStart) / 86400000 + 1) / 7);
-  const isoLabel = `${isoYear}-W${String(isoWeek).padStart(2, '0')}`;
-
-  // "n월 n주차" — 그 주 월요일이 그 달의 몇 번째 월요일인지
-  const weekOfMonth = Math.floor((monday.getDate() - 1) / 7) + 1;
-  const monthWeekLabel = `${monday.getMonth() + 1}월 ${weekOfMonth}주차`;
-
-  return { today: todayName, dates, isoLabel, monthWeekLabel };
+  return DataService.getWeekInfo(now);
 }
 
 // OCR brand "PIA / 액상" → "PIA" 정규화. 본체는 data-service.js (위임).

@@ -366,6 +366,39 @@
     return { errorCount, notInMaster, noInks, show, tooltip };
   }
 
+  // 잉크 부족 신호 수집(순수 코어): weeklyNeed < 0 = 월요일 현재고로 주간 총소요 불가.
+  // 단일 출처 = computeInkMetrics().weeklyNeed → ink-plan 페이지 빨강 표시와 동일 기준.
+  // weeklyNeed는 '월'요일에만 산출되며, 현재고 미입력 잉크는 null → 자동 제외(오탐 방지).
+  function collectInkShortage(merged, computedByInk) {
+    const items = [];
+    for (const ink of (merged || [])) {
+      const wn = computedByInk.get(ink.name)?.get('월')?.weeklyNeed;
+      if (wn != null && Number(wn) < 0) {
+        items.push({ ink: ink.name, weeklyNeed: Number(wn) });
+      }
+    }
+    items.sort((a, b) => a.weeklyNeed - b.weeklyNeed); // 가장 부족한 순
+    const n = items.length;
+    const names = items.slice(0, 3).map(i => i.ink).join(' · ');
+    return {
+      shortageCount: n,
+      items,
+      show: n > 0,
+      tooltip: n > 0 ? `재고 부족 임박 ${n}건 — ${names}${n > 3 ? ' 외' : ''}` : '재고 정상',
+    };
+  }
+
+  // 전역 알림용 어댑터: data → 부족 배지 모델. ink-plan 페이지와 동일 함수 합성.
+  function buildInkShortageBadge(data, dates) {
+    const days = WEEKDAYS;
+    const productLookup     = buildProductLookup(data.products);
+    const demandByInkDay    = buildDemandByInkDay(data.injection, productLookup);
+    const inventoryByInkDay = buildInventoryByInkDay(data.inventory, dates);
+    const merged            = mergeInkPlanAndTestInks(data.inkPlan, data.testInks, days);
+    const computedByInk     = computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days);
+    return collectInkShortage(merged, computedByInk);
+  }
+
   function localDateISO(now = new Date()) {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -655,6 +688,44 @@
     const d = parseDateLocal(iso);
     if (!d) return fallback;
     return DAY_BY_IDX[d.getDay()];
+  }
+
+  // 시스템 날짜에서 "이번 주" 정보 계산 (ui.jsx 에서 이전 — 날짜 로직 단일 출처).
+  //   - today: 한국어 요일 ('월'~'일') — 토/일이면 그 자체
+  //   - dates: { '월':'M/D', '화':'M/D', ..., '일':'M/D', '차주월':'M/D' }
+  //   - isoLabel: 'YYYY-Www' (ISO 8601 주차, 그 주 목요일이 속한 해 기준)
+  //   - monthWeekLabel: 'n월 n주차' (그 주 월요일이 그 달의 몇 번째 월요일인지)
+  function getWeekInfo(now = new Date()) {
+    const days = WEEKDAYS;
+    const todayName = DAY_BY_IDX[now.getDay()];
+    // 월요일까지 며칠 빼야 하는가 (일=6, 월=0, 화=1, …, 토=5)
+    const offsetToMonday = (now.getDay() + 6) % 7;
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(now.getDate() - offsetToMonday);
+    const dates = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      dates[days[i]] = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+    const nextMon = new Date(monday);
+    nextMon.setDate(monday.getDate() + 7);
+    dates['차주월'] = `${nextMon.getMonth() + 1}/${nextMon.getDate()}`;
+
+    // ISO 8601 주차 (그 주 목요일이 속한 해 기준)
+    const thursday = new Date(monday);
+    thursday.setDate(monday.getDate() + 3);
+    const isoYear = thursday.getFullYear();
+    const yearStart = new Date(isoYear, 0, 1);
+    const isoWeek = Math.ceil(((thursday - yearStart) / 86400000 + 1) / 7);
+    const isoLabel = `${isoYear}-W${String(isoWeek).padStart(2, '0')}`;
+
+    // "n월 n주차" — 그 주 월요일이 그 달의 몇 번째 월요일인지
+    const weekOfMonth = Math.floor((monday.getDate() - 1) / 7) + 1;
+    const monthWeekLabel = `${monday.getMonth() + 1}월 ${weekOfMonth}주차`;
+
+    return { today: todayName, dates, isoLabel, monthWeekLabel };
   }
 
   // machineAssignments record에서 잉크명 추출 (구버전 호환)
@@ -1110,6 +1181,8 @@
     aggregateChemicalRequest,
     lintMasters,
     buildMasterHealthBadge,
+    collectInkShortage,
+    buildInkShortageBadge,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,
@@ -1133,6 +1206,7 @@
     normalizeProductName,
     normalizeBrand,
     dayFromDate,
+    getWeekInfo,
     inkOfAssignment,
     // ink-plan 파생 엔진
     buildProductLookup,

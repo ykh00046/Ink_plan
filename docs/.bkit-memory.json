@@ -1,11 +1,11 @@
 {
-  "sessionCount": 5,
+  "sessionCount": 7,
   "lastSession": {
-    "startedAt": "2026-06-07T19:58:07.094Z",
+    "startedAt": "2026-06-07T20:01:20.959Z",
     "platform": "claude",
     "level": "Dynamic"
   },
-  "activeFeature": "unmapped-products-badge",
+  "activeFeature": "inventory-shortage-alert",
   "phase": "completed",
   "matchRate": 100,
   "history": [
@@ -16,6 +16,16 @@
     },
     {
       "feature": "unmapped-products-badge",
+      "phase": "completed",
+      "matchRate": 100
+    },
+    {
+      "feature": "date-utils-unification",
+      "phase": "completed",
+      "matchRate": 100
+    },
+    {
+      "feature": "inventory-shortage-alert",
       "phase": "completed",
       "matchRate": 100
     }

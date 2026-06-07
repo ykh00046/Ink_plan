@@ -151,3 +151,51 @@ test('relabelLotsForDate: 잉크가 없으면 빈 배열', () => {
   const result = DataService.relabelLotsForDate([], 'NONEXIST', '2026-05-13');
   assert.equal(result.length, 0);
 });
+
+// ── getWeekInfo (ui.jsx 에서 data-service.js 로 통합 — 골든값으로 동작 고정) ──────
+// 로컬 자정 기준 결정론적 테스트 (정오 주입으로 DST/타임존 경계 회피).
+function atNoon(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+test('getWeekInfo: 주중(수) 기준 — 그 주 월요일/일요일/차주월 dates', () => {
+  const w = DataService.getWeekInfo(atNoon('2026-05-13'));
+  assert.equal(w.dates['월'], '5/11');
+  assert.equal(w.dates['일'], '5/17');
+  assert.equal(w.dates['차주월'], '5/18');
+});
+
+test('getWeekInfo: today 는 한국어 요일명', () => {
+  assert.equal(DataService.getWeekInfo(atNoon('2026-05-13')).today, '수');
+  assert.equal(DataService.getWeekInfo(atNoon('2026-06-01')).today, '월');
+});
+
+test('getWeekInfo: 일요일도 그 주에 귀속 (offsetToMonday=6)', () => {
+  const w = DataService.getWeekInfo(atNoon('2026-05-17'));
+  assert.equal(w.today, '일');
+  assert.equal(w.dates['월'], '5/11'); // 수요일 케이스와 동일 주
+});
+
+test('getWeekInfo: isoLabel 형식 YYYY-Www', () => {
+  assert.match(DataService.getWeekInfo(atNoon('2026-05-13')).isoLabel, /^\d{4}-W\d{2}$/);
+  assert.equal(DataService.getWeekInfo(atNoon('2026-05-13')).isoLabel, '2026-W20');
+});
+
+test('getWeekInfo: 연말 ISO 주차 경계 — 2026-12-31(목)은 2026-W53', () => {
+  const w = DataService.getWeekInfo(atNoon('2026-12-31'));
+  assert.equal(w.isoLabel, '2026-W53');
+  assert.equal(w.dates['금'], '1/1'); // 주가 연도를 넘어감
+  assert.equal(w.dates['차주월'], '1/4');
+});
+
+test('getWeekInfo: n월 n주차 라벨 — 5/11은 5월 2주차', () => {
+  assert.equal(DataService.getWeekInfo(atNoon('2026-05-13')).monthWeekLabel, '5월 2주차');
+});
+
+test('getWeekInfo: 월 경계 — 6/1(월) 시작 주는 6월 1주차', () => {
+  const w = DataService.getWeekInfo(atNoon('2026-06-01'));
+  assert.equal(w.monthWeekLabel, '6월 1주차');
+  assert.equal(w.dates['월'], '6/1');
+  assert.equal(w.isoLabel, '2026-W23');
+});

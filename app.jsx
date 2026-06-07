@@ -78,7 +78,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 54;
+const APP_REV = 55;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -233,6 +233,12 @@ function App() {
     return DataService.buildMasterHealthBadge(lint.summary);
   }, [data]);
 
+  // 재고 부족 예상 전역 알림 — ink-plan 페이지와 동일한 computeInkMetrics().weeklyNeed 단일 출처에서 파생.
+  const inkShortage = useMemo(() => {
+    if (!data) return { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' };
+    return DataService.buildInkShortageBadge(data, weekInfo.dates);
+  }, [data, weekInfo.dates]);
+
   if (!data) {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100vh', color: 'var(--ink-600)' }}>로딩 중…</div>;
   }
@@ -263,6 +269,16 @@ function App() {
   };
   const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveSettings, geminiModel, ocrResult, setOcrResult, lastMergeInfo, setLastMergeInfo, setView, today: weekInfo.today, dates: weekInfo.dates };
 
+  // 헤더 bell = 통합 알림 센터(마스터 결함 + 재고 부족). 심각도 우선: 마스터 error는 빨강·data-quality.
+  const bellShow = masterHealth.show || inkShortage.show;
+  const bellCount = (masterHealth.show ? masterHealth.errorCount : 0) + inkShortage.shortageCount;
+  const bellTip = [masterHealth.show ? masterHealth.tooltip : null, inkShortage.show ? inkShortage.tooltip : null].filter(Boolean).join(' / ') || '처리 필요 알림 없음';
+  const bellBad = masterHealth.show; // 마스터 error 있으면 빨강, 아니면 주황
+  const bellTo = masterHealth.show ? 'data-quality' : 'ink-plan';
+  const bellStyle = bellBad
+    ? { background: 'var(--bad-100, oklch(0.95 0.05 25))', borderColor: 'var(--bad-600, oklch(0.55 0.18 25))', color: 'var(--bad-600, oklch(0.55 0.18 25))' }
+    : { background: 'var(--warn-100, oklch(0.96 0.06 80))', borderColor: 'var(--warn-600, oklch(0.62 0.14 70))', color: 'var(--warn-600, oklch(0.62 0.14 70))' };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -282,12 +298,12 @@ function App() {
           <div className="app__chip">Rev. {APP_REV}</div>
           <button
             className="app__chip"
-            title={masterHealth.tooltip}
-            onClick={() => masterHealth.show && setView('data-quality')}
-            style={masterHealth.show ? { background: 'var(--bad-100, oklch(0.95 0.05 25))', borderColor: 'var(--bad-600, oklch(0.55 0.18 25))', color: 'var(--bad-600, oklch(0.55 0.18 25))' } : null}
+            title={bellTip}
+            onClick={() => bellShow && setView(bellTo)}
+            style={bellShow ? bellStyle : null}
           >
             <Icon name="bell" size={12} />
-            {masterHealth.show && <span style={{ marginLeft: 4, fontWeight: 700 }}>{masterHealth.errorCount}</span>}
+            {bellShow && <span style={{ marginLeft: 4, fontWeight: 700 }}>{bellCount}</span>}
           </button>
           <button
             className="app__chip"
@@ -322,6 +338,9 @@ function App() {
                 {item.id === 'test-inks' && <span className="sb-item__badge" style={{background:'oklch(0.95 0.05 30)',color:'oklch(0.50 0.16 30)'}}>{data.testInks?.length || 0}</span>}
                 {item.id === 'data-quality' && masterHealth.show && (
                   <span className="sb-item__badge sb-item__badge--alert" title={masterHealth.tooltip}>{masterHealth.errorCount}</span>
+                )}
+                {item.id === 'ink-plan' && inkShortage.show && (
+                  <span className="sb-item__badge sb-item__badge--warn" title={inkShortage.tooltip}>{inkShortage.shortageCount}</span>
                 )}
               </div>
             ))}

@@ -577,3 +577,50 @@ test('isInkInMaster 가 normalizeInkName 기준으로 일관 매칭', () => {
   assert.equal(DataService.isInkInMaster('red ink', master), true);
   assert.equal(DataService.isInkInMaster('없는잉크', master), false);
 });
+
+// ── 재고 부족 예상 전역 알림 (inventory-shortage-alert) ──────────────────────
+const mkCb = (entries) => new Map(entries.map(([name, wn]) => [name, new Map([['월', { weeklyNeed: wn }]])]));
+
+test('collectInkShortage: 부족 없음(weeklyNeed>=0/null만) → show:false', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }];
+  const cb = mkCb([['A', 3], ['B', null]]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.equal(r.show, false);
+  assert.equal(r.shortageCount, 0);
+  assert.deepEqual(r.items, []);
+  assert.equal(r.tooltip, '재고 정상');
+});
+
+test('collectInkShortage: 부족 1건 → 해당 잉크 수집', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }];
+  const cb = mkCb([['A', -2], ['B', 5]]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.equal(r.show, true);
+  assert.equal(r.shortageCount, 1);
+  assert.equal(r.items[0].ink, 'A');
+  assert.equal(r.items[0].weeklyNeed, -2);
+});
+
+test('collectInkShortage: 다건은 가장 부족한 순(weeklyNeed 오름차순) 정렬', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }, { name: 'C' }];
+  const cb = mkCb([['A', -1], ['B', -9], ['C', -4]]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.deepEqual(r.items.map(i => i.ink), ['B', 'C', 'A']);
+});
+
+test('collectInkShortage: weeklyNeed null(현재고 미입력)은 제외', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }];
+  const cb = mkCb([['A', null], ['B', -1]]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.equal(r.shortageCount, 1);
+  assert.equal(r.items[0].ink, 'B');
+});
+
+test('collectInkShortage: 3건 초과 tooltip 상위 3개 + "외" 접미사', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }];
+  const cb = mkCb([['A', -5], ['B', -4], ['C', -3], ['D', -2]]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.equal(r.shortageCount, 4);
+  assert.match(r.tooltip, /재고 부족 임박 4건/);
+  assert.match(r.tooltip, /A · B · C 외$/);
+});

@@ -43,8 +43,8 @@ function invFmtDate(iso) {
 }
 
 function invDayKor(iso) {
-  const d = parseDateLocal(iso);
-  return d ? DataService.DAY_BY_IDX[d.getDay()] : '';
+  // 요일 추출 단일 출처(data-service.js). fallback '' 로 기존 동작 보존.
+  return DataService.dayFromDate(iso, '');
 }
 
 function invDaysBetween(fromISO, toISO) {
