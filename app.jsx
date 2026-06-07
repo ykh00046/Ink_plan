@@ -78,7 +78,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 53;
+const APP_REV = 54;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -226,6 +226,13 @@ function App() {
 
   const weekInfo = useMemo(() => getWeekInfo(), []);
 
+  // 마스터 정합성 전역 경고 배지 — data-quality 페이지와 동일한 lintMasters 단일 출처에서 파생.
+  // data===null이어도 lintMasters는 null-safe → show=false.
+  const masterHealth = useMemo(() => {
+    const lint = DataService.lintMasters(data, { normalize: normalizeProductName });
+    return DataService.buildMasterHealthBadge(lint.summary);
+  }, [data]);
+
   if (!data) {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100vh', color: 'var(--ink-600)' }}>로딩 중…</div>;
   }
@@ -273,7 +280,15 @@ function App() {
         <div className="app__toolbar">
           <div className="app__chip"><span className="dot" /><span>주차: {weekInfo.isoLabel}</span></div>
           <div className="app__chip">Rev. {APP_REV}</div>
-          <button className="app__chip" title="알림"><Icon name="bell" size={12} /></button>
+          <button
+            className="app__chip"
+            title={masterHealth.tooltip}
+            onClick={() => masterHealth.show && setView('data-quality')}
+            style={masterHealth.show ? { background: 'var(--bad-100, oklch(0.95 0.05 25))', borderColor: 'var(--bad-600, oklch(0.55 0.18 25))', color: 'var(--bad-600, oklch(0.55 0.18 25))' } : null}
+          >
+            <Icon name="bell" size={12} />
+            {masterHealth.show && <span style={{ marginLeft: 4, fontWeight: 700 }}>{masterHealth.errorCount}</span>}
+          </button>
           <button
             className="app__chip"
             title="설정"
@@ -305,6 +320,9 @@ function App() {
                   : <span>{item.label}</span>}
                 {item.id === 'products' && <span className="sb-item__badge">{data.products?.length || 0}</span>}
                 {item.id === 'test-inks' && <span className="sb-item__badge" style={{background:'oklch(0.95 0.05 30)',color:'oklch(0.50 0.16 30)'}}>{data.testInks?.length || 0}</span>}
+                {item.id === 'data-quality' && masterHealth.show && (
+                  <span className="sb-item__badge sb-item__badge--alert" title={masterHealth.tooltip}>{masterHealth.errorCount}</span>
+                )}
               </div>
             ))}
           </React.Fragment>

@@ -375,6 +375,58 @@ test('lintMasters: byCategory / bySeverity 집계 정확', () => {
   assert.equal(r.summary.total, r.issues.length);
 });
 
+// ── buildMasterHealthBadge (전역 경고 배지 표시 모델) ───────────────────────
+
+test('buildMasterHealthBadge: 결함 없음 → show=false, 정상 tooltip', () => {
+  const b = DataService.buildMasterHealthBadge({ bySeverity: { error: 0, warn: 0, info: 0 }, byCategory: {} });
+  assert.equal(b.show, false);
+  assert.equal(b.errorCount, 0);
+  assert.equal(b.tooltip, '마스터 데이터 정상');
+});
+
+test('buildMasterHealthBadge: 마스터 누락만 → show=true, tooltip에 건수', () => {
+  const b = DataService.buildMasterHealthBadge({
+    bySeverity: { error: 2 },
+    byCategory: { 'product-not-in-master': 2 },
+  });
+  assert.equal(b.show, true);
+  assert.equal(b.errorCount, 2);
+  assert.equal(b.notInMaster, 2);
+  assert.equal(b.noInks, 0);
+  assert.ok(b.tooltip.includes('마스터에 없는 제품 2건'));
+});
+
+test('buildMasterHealthBadge: 누락+잉크빔 복합 → 두 항목 분해 tooltip', () => {
+  const b = DataService.buildMasterHealthBadge({
+    bySeverity: { error: 3 },
+    byCategory: { 'product-not-in-master': 1, 'product-no-inks': 2 },
+  });
+  assert.equal(b.errorCount, 3);
+  assert.equal(b.notInMaster, 1);
+  assert.equal(b.noInks, 2);
+  assert.equal(b.tooltip, '데이터 점검 필요 — 마스터에 없는 제품 1건 · 잉크 미등록 제품 2건');
+});
+
+test('buildMasterHealthBadge: null/undefined 방어 — 예외 없이 show=false', () => {
+  const b = DataService.buildMasterHealthBadge(undefined);
+  assert.equal(b.show, false);
+  assert.equal(b.errorCount, 0);
+});
+
+test('buildMasterHealthBadge: lintMasters 결과와 연동되면 errorCount 일치', () => {
+  const data = {
+    products: [{ name: 'P_empty', inks: [] }],
+    machineAssignments: [],
+    injection: { '3층': [{ machine: '10호기', schedule: { 월: { day: 'UNK' } } }] },
+  };
+  const summary = DataService.lintMasters(data).summary;
+  const b = DataService.buildMasterHealthBadge(summary);
+  assert.equal(b.errorCount, summary.bySeverity.error);  // P_empty + UNK = 2
+  assert.equal(b.show, summary.bySeverity.error > 0);
+  assert.equal(b.notInMaster, 1);  // UNK
+  assert.equal(b.noInks, 1);       // P_empty
+});
+
 // ── buildInkMaster / isInkInMaster (잉크 cascade 선택) ──────────────────────
 
 test('buildInkMaster: 빈/누락 데이터는 빈 배열', () => {

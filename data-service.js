@@ -346,6 +346,26 @@
     };
   }
 
+  // 마스터 정합성 요약(lintMasters().summary) → 전역 경고 배지 표시 모델.
+  // 순수 함수, 부수효과 없음. error 심각도(제품 마스터를 손봐야 발주 누락을 막는 결함)만
+  // 배지화한다. warn/info(중복 등록·코드 미입력 등)는 상시 알람에서 제외해 알람 피로 방지.
+  function buildMasterHealthBadge(lintSummary) {
+    const s = lintSummary || {};
+    const bySeverity = s.bySeverity || {};
+    const byCategory = s.byCategory || {};
+    const errorCount  = bySeverity.error || 0;
+    const notInMaster = byCategory['product-not-in-master'] || 0;  // 사출계획에 있으나 마스터에 없는 제품
+    const noInks      = byCategory['product-no-inks'] || 0;        // 잉크가 비어 있는 제품
+    const show = errorCount > 0;
+    const parts = [];
+    if (notInMaster > 0) parts.push(`마스터에 없는 제품 ${notInMaster}건`);
+    if (noInks > 0)      parts.push(`잉크 미등록 제품 ${noInks}건`);
+    const tooltip = show
+      ? `데이터 점검 필요 — ${parts.join(' · ')}`
+      : '마스터 데이터 정상';
+    return { errorCount, notInMaster, noInks, show, tooltip };
+  }
+
   function localDateISO(now = new Date()) {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -1089,6 +1109,7 @@
     machineNoOf,
     aggregateChemicalRequest,
     lintMasters,
+    buildMasterHealthBadge,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,

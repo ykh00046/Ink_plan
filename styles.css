@@ -263,6 +263,9 @@ button { background: none; border: none; cursor: pointer; }
   color: var(--ink-700);
 }
 .sb-item.active .sb-item__badge { background: var(--brand-100); color: var(--brand-700); }
+/* 마스터 정합성 경고 배지 — 처리 필요한 error 건수 강조 */
+.sb-item__badge--alert { background: var(--bad-100, oklch(0.95 0.05 25)); color: var(--bad-600, oklch(0.55 0.18 25)); }
+.sb-item.active .sb-item__badge--alert { background: var(--bad-100, oklch(0.95 0.05 25)); color: var(--bad-600, oklch(0.55 0.18 25)); }
 
 /* 라벨 + 한 줄 부제(자동 누적 안내) — 헷갈리는 메뉴 구분용 */
 .sb-item__text { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; min-width: 0; }

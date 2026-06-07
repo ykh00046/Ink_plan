@@ -1,8 +1,23 @@
 {
-  "sessionCount": 3,
+  "sessionCount": 5,
   "lastSession": {
-    "startedAt": "2026-06-01T07:05:41.119Z",
+    "startedAt": "2026-06-07T19:58:07.094Z",
     "platform": "claude",
     "level": "Dynamic"
-  }
+  },
+  "activeFeature": "unmapped-products-badge",
+  "phase": "completed",
+  "matchRate": 100,
+  "history": [
+    {
+      "feature": "r3-dedup-unification",
+      "phase": "completed",
+      "matchRate": 100
+    },
+    {
+      "feature": "unmapped-products-badge",
+      "phase": "completed",
+      "matchRate": 100
+    }
+  ]
 }
