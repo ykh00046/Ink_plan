@@ -50,6 +50,7 @@ function migrateData(raw) {
 //   재고 조사 → INK 요청서 → 검수 → 사출계획 → 잉크 생산계획 → 층별 공급
 const NAV = [
   { group: '일일 작업', items: [
+    { id: 'dashboard',  label: '대시보드', icon: 'sparkle' },
     { id: 'inventory',  step: '1', label: '재고 조사',       icon: 'flask' },
     { id: 'ocr-import', step: '2', label: 'INK 요청서 입력', icon: 'upload' },
     { id: 'review',     step: '3', label: '미등록 제품 확인', icon: 'sparkle' },
@@ -74,11 +75,12 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "default",
   "accent": "blue",
   "stickySidebar": true,
-  "showRowNum": true
+  "showRowNum": true,
+  "requester": ""
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 55;
+const APP_REV = 56;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -89,7 +91,7 @@ const ACCENT_PRESETS = {
 
 function App() {
   const [data, setData] = useState(null);
-  const [view, setView] = useState('inventory');
+  const [view, setView] = useState('dashboard');
   const [tweaks, setTweaks] = useTweaks(TWEAK_DEFAULTS);
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -353,6 +355,7 @@ function App() {
       </aside>
 
       <main className="app__main">
+        {view === 'dashboard' && <DashboardPage ctx={ctx} />}
         {view === 'ocr-import' && <OcrImportPage ctx={ctx} />}
         {view === 'review' && <ReviewPage ctx={ctx} />}
         {view === 'injection' && <InjectionPage ctx={ctx} />}
@@ -566,6 +569,11 @@ function TweaksControls({ tweaks, setTweak }) {
       </TweakSection>
       <TweakSection title="테이블">
         <TweakToggle label="행 번호 표시" value={tweaks.showRowNum} onChange={v => setTweak('showRowNum', v)} />
+      </TweakSection>
+      <TweakSection title="약품요청서">
+        <TweakText label="발주 작성자" value={tweaks.requester || ''}
+          placeholder="예: 김선명 (생산관리팀)"
+          onChange={v => setTweak('requester', v)} />
       </TweakSection>
     </TweaksPanel>
   );

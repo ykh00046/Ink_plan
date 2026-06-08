@@ -3,7 +3,7 @@
 // 인쇄·공유용 발주서를 만든다. 데이터 변경 없음(read-only 집계).
 
 function ChemicalsPage({ ctx }) {
-  const { data, notify, today } = ctx;
+  const { data, notify, today, tweaks } = ctx;
   const WEEK = WEEKDAYS;          // 요일 단일 출처(data-service.js)
   const ALL_DAYS = WEEKDAYS_PLUS; // +차주월
 
@@ -53,6 +53,11 @@ function ChemicalsPage({ ctx }) {
   }, [days, shiftMode, floorMode]);
 
   const todayISO = DataService.localDateISO();
+  // 인쇄 메타(작성자 fallback·문서번호·요약·결재 roster) — 단일 출처 순수 코어.
+  const meta = useMemo(
+    () => DataService.buildChemicalRequestMeta(totals, rangeLabel, tweaks && tweaks.requester, todayISO),
+    [totals, rangeLabel, tweaks, todayISO]
+  );
   const printedAt = useMemo(() => {
     const d = new Date();
     const hh = String(d.getHours()).padStart(2, '0');
@@ -182,13 +187,14 @@ function ChemicalsPage({ ctx }) {
 
         {/* 인쇄용 헤더 — 평소 숨김, 인쇄 시 표시 */}
         <div className="chem-print-header">
-          <h1>잉크 발주 요청서</h1>
+          <h1>{meta.title}</h1>
           <div className="meta">
+            <div>문서번호: {meta.docNo}</div>
             <div>작성일: {todayISO}</div>
-            <div>작성자: 김선명 (생산관리팀)</div>
+            <div>작성자: {meta.requesterName}</div>
             <div>출력 시각: {printedAt}</div>
-            <div>대상 범위: {rangeLabel}</div>
-            <div>총 잉크: {totals.kinds}종 / 총 세트: {totals.total} (3F {totals.f3} · 1F {totals.f1})</div>
+            <div>대상 범위: {meta.rangeLabel}</div>
+            <div>{meta.summary}</div>
           </div>
         </div>
 
@@ -256,6 +262,16 @@ function ChemicalsPage({ ctx }) {
             </table>
           </div>
         </Card>
+
+        {/* 결재란 — 평소 숨김, 인쇄 시만 표시 (종이 결재·회람용) */}
+        <div className="chem-approval">
+          {meta.approvals.map(role => (
+            <div className="chem-approval__box" key={role}>
+              <div className="chem-approval__role">{role}</div>
+              <div className="chem-approval__sign"></div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

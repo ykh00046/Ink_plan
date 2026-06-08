@@ -399,6 +399,80 @@
     return collectInkShortage(merged, computedByInk);
   }
 
+  // 전역 통합 대시보드 요약 모델(순수 합성). 기존 어댑터(lintMasters→buildMasterHealthBadge,
+  // buildInkShortageBadge)를 단일 모델로 묶는다. 새 임계값·계산을 발명하지 않으므로 각 페이지·
+  // 사이드바 배지·bell과 수치가 항상 일치한다. data===null 안전(모든 카운트 0, tone 'ok').
+  function buildDashboardSummary(data, dates, opts) {
+    opts = opts || {};
+    const countOf = (v) => Array.isArray(v) ? v.length
+      : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+
+    // 1) 마스터 정합성 — lintMasters → buildMasterHealthBadge (전역 배지와 동일 경로)
+    const lint = lintMasters(data, opts.normalize ? { normalize: opts.normalize } : undefined);
+    const mh = buildMasterHealthBadge(lint.summary);
+    const master = {
+      errorCount:  mh.errorCount || 0,
+      notInMaster: mh.notInMaster || 0,
+      noInks:      mh.noInks || 0,
+      show:        !!mh.show,
+      tooltip:     mh.tooltip,
+      tone:        (mh.errorCount || 0) > 0 ? 'bad' : 'ok',
+    };
+
+    // 2) 재고 부족 임박 — buildInkShortageBadge (ink-plan 빨강 셀·bell과 동일 출처)
+    // 진입 화면이라 부분/이상 데이터에도 절대 throw 금지 → 실패 시 '정상'으로 graceful.
+    let sb = { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' };
+    if (data) {
+      try { sb = buildInkShortageBadge(data, dates); } catch (e) { /* keep default */ }
+    }
+    const shortage = {
+      count:   sb.shortageCount || 0,
+      items:   (sb.items || []).slice(0, 5), // 가장 부족한 상위 5
+      show:    !!sb.show,
+      tooltip: sb.tooltip,
+      tone:    (sb.shortageCount || 0) > 0 ? 'warn' : 'ok',
+    };
+
+    // 3) 마스터 규모(참고용, 비경보) — 배열/객체 모두 안전 카운트
+    const d = data || {};
+    const masters = {
+      products:  countOf(d.products),
+      inks:      countOf(d.inkPlan),
+      chemicals: countOf(d.chemicals),
+    };
+
+    // 4) 이번 주 일정 — dates는 { 요일: 'M/D' } 객체(getWeekInfo) 또는 배열 모두 허용
+    let weekDates = [];
+    if (Array.isArray(dates)) {
+      weekDates = dates;
+    } else if (dates && typeof dates === 'object') {
+      weekDates = WEEKDAYS.map(d => dates[d]).filter(Boolean);
+    }
+    const todayDate = (dates && !Array.isArray(dates) && opts.today)
+      ? (dates[opts.today] || null) : null;
+    const week = { today: opts.today || null, todayDate, dates: weekDates, dayCount: weekDates.length };
+
+    return { master, shortage, masters, week };
+  }
+
+  // 약품요청서 인쇄 메타 — 작성자 fallback·문서번호·요약·결재 roster를 한 곳에서 산출.
+  // todayISO는 주입(순수 유지). 데이터 변경 없음(read-only 인쇄 메타).
+  function buildChemicalRequestMeta(totals, rangeLabel, requester, todayISO) {
+    const name = (requester != null && String(requester).trim()) || '생산관리팀';
+    const ymd = String(todayISO || '').split('-').join('');   // 2026-06-08 → 20260608
+    const docNo = ymd ? `약품-${ymd}` : '약품-미상';
+    const t = totals || { kinds: 0, total: 0, f3: 0, f1: 0, noCode: 0 };
+    return {
+      title: '잉크 발주 요청서',
+      docNo,
+      requesterName: name,
+      rangeLabel: rangeLabel || '없음',
+      summary: `총 잉크 ${t.kinds || 0}종 / 총 세트 ${t.total || 0} (3F ${t.f3 || 0} · 1F ${t.f1 || 0})`,
+      noCode: t.noCode || 0,            // 인쇄물에도 코드미입력 경고 노출용
+      approvals: ['작성', '검토', '승인'],
+    };
+  }
+
   function localDateISO(now = new Date()) {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -1179,10 +1253,12 @@
     updateMachineAssignment,
     machineNoOf,
     aggregateChemicalRequest,
+    buildChemicalRequestMeta,
     lintMasters,
     buildMasterHealthBadge,
     collectInkShortage,
     buildInkShortageBadge,
+    buildDashboardSummary,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,
