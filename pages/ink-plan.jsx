@@ -482,7 +482,7 @@ function InkPlanPage({ ctx }) {
               <tbody>
                 {filtered.map((ink, i) => (
                   <InkPlanRow
-                    key={ink.name + i}
+                    key={ink.name}
                     ink={ink}
                     visibleDays={visibleDays}
                     today={today}

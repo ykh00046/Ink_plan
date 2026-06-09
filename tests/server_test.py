@@ -4,8 +4,10 @@ Handler 의 가드 메서드(is_api_request_allowed / is_blocked_static)는
 self.headers 와 self.path 만 읽으므로, 소켓 바인딩(__init__)을 우회한
 Handler.__new__(Handler) 인스턴스에 헤더/경로만 주입해 단위 검증한다.
 """
+import io
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -17,6 +19,20 @@ def make_handler(headers=None, path="/"):
     h.headers = headers or {}
     h.path = path
     return h
+
+
+def make_post_handler(body=b"", headers=None, path="/api/db"):
+    """do_POST/read_body_json 단위 검증용 — 소켓 없이 rfile/headers 주입,
+    send_json 을 스텁해 (status, payload) 를 캡처한다."""
+    h = server.Handler.__new__(server.Handler)
+    base = {"Host": "127.0.0.1", "Content-Length": str(len(body))}
+    base.update(headers or {})
+    h.headers = base
+    h.path = path
+    h.rfile = io.BytesIO(body)
+    cap = {}
+    h.send_json = lambda payload, status=200: cap.update(status=status, payload=payload)
+    return h, cap
 
 
 class ApiGuardTest(unittest.TestCase):
@@ -32,9 +48,9 @@ class ApiGuardTest(unittest.TestCase):
         # DNS rebinding: 공격자 도메인이 127.0.0.1로 리바인딩돼도 Host 는 공격자 도메인
         self.assertFalse(make_handler({"Host": "evil.com"}).is_api_request_allowed())
 
-    def test_empty_host_allowed(self):
-        # Host 헤더 부재(빈 문자열)는 통과 — 기존 동작 명문화 (host falsy → 검사 skip)
-        self.assertTrue(make_handler({}).is_api_request_allowed())
+    def test_empty_host_blocked(self):
+        # Host 헤더 부재(빈 문자열)도 거부 — 비브라우저 클라이언트 방어 강화(동작 변경).
+        self.assertFalse(make_handler({}).is_api_request_allowed())
 
     def test_same_origin_allowed(self):
         h = make_handler({"Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:8765"})
@@ -66,6 +82,18 @@ class BlockedStaticTest(unittest.TestCase):
     def test_settings_path_blocked(self):
         self.assertTrue(make_handler(path="/data/settings.json").is_blocked_static())
 
+    def test_clean_json_seed_allowed(self):
+        # 프론트 시드 폴백(app.jsx) 에 필요 → 명시 허용
+        self.assertFalse(make_handler(path="/data/clean.json").is_blocked_static())
+
+    def test_clean_json_uppercase_allowed(self):
+        # 대소문자 무관 허용
+        self.assertFalse(make_handler(path="/DATA/CLEAN.JSON").is_blocked_static())
+
+    def test_sheets_json_blocked(self):
+        # deny-by-default — allowlist 외 /data/ 파일은 차단(이전엔 노출됐음)
+        self.assertTrue(make_handler(path="/data/sheets.json").is_blocked_static())
+
     def test_normal_asset_allowed(self):
         self.assertFalse(make_handler(path="/index.html").is_blocked_static())
         self.assertFalse(make_handler(path="/app.jsx").is_blocked_static())
@@ -77,6 +105,79 @@ class BlockedStaticTest(unittest.TestCase):
     def test_percent_encoded_bypass_blocked(self):
         # 퍼센트 인코딩 우회 차단 (unquote 후 비교)
         self.assertTrue(make_handler(path="/data%2Fdb/current.json").is_blocked_static())
+
+    def test_encoded_sheets_bypass_blocked(self):
+        self.assertTrue(make_handler(path="/data%2Fsheets.json").is_blocked_static())
+
+
+class ReadBodyJsonTest(unittest.TestCase):
+    """read_body_json — 본문 파싱/검증 (chunked·Content-Length 견고성)."""
+
+    def test_valid_body(self):
+        h, _ = make_post_handler(b'{"a": 1}')
+        self.assertEqual(h.read_body_json(), {"a": 1})
+
+    def test_empty_body_returns_none(self):
+        h, _ = make_post_handler(b"")
+        self.assertIsNone(h.read_body_json())
+
+    def test_oversized_content_length_raises(self):
+        h, _ = make_post_handler(b"", headers={"Content-Length": str(server.MAX_BODY_BYTES + 1)})
+        with self.assertRaises(ValueError):
+            h.read_body_json()
+
+    def test_non_integer_content_length_raises(self):
+        h, _ = make_post_handler(b"x", headers={"Content-Length": "abc"})
+        with self.assertRaises(ValueError):
+            h.read_body_json()
+
+    def test_chunked_transfer_raises(self):
+        h, _ = make_post_handler(b'{"a":1}', headers={"Transfer-Encoding": "chunked"})
+        with self.assertRaises(ValueError):
+            h.read_body_json()
+
+
+class PostErrorMappingTest(unittest.TestCase):
+    """do_POST — 예외→상태코드 매핑 (정보 노출 없는 일반 메시지)."""
+
+    def test_non_dict_body_400(self):
+        h, cap = make_post_handler(b"123", path="/api/db")  # int → dict 아님
+        h.do_POST()
+        self.assertEqual(cap["status"], 400)
+
+    def test_broken_json_400(self):
+        h, cap = make_post_handler(b"{bad", path="/api/db")
+        h.do_POST()
+        self.assertEqual(cap["status"], 400)
+
+    def test_oversized_400(self):
+        h, cap = make_post_handler(
+            b"", headers={"Content-Length": str(server.MAX_BODY_BYTES + 1)}, path="/api/db")
+        h.do_POST()
+        self.assertEqual(cap["status"], 400)
+
+    def test_non_integer_content_length_400(self):
+        h, cap = make_post_handler(b"x", headers={"Content-Length": "abc"}, path="/api/db")
+        h.do_POST()
+        self.assertEqual(cap["status"], 400)
+
+    def test_chunked_400(self):
+        h, cap = make_post_handler(
+            b'{"a":1}', headers={"Transfer-Encoding": "chunked"}, path="/api/db")
+        h.do_POST()
+        self.assertEqual(cap["status"], 400)
+
+    def test_restore_missing_backup_404(self):
+        h, cap = make_post_handler(b'{"name": "none.json"}', path="/api/restore")
+        with patch.object(server, "restore_backup", side_effect=FileNotFoundError("/abs/none.json")):
+            h.do_POST()
+        self.assertEqual(cap["status"], 404)
+        self.assertNotIn("/abs", str(cap["payload"]))  # 절대경로 미노출
+
+    def test_external_host_403(self):
+        h, cap = make_post_handler(b'{"a":1}', headers={"Host": "evil.com"}, path="/api/db")
+        h.do_POST()
+        self.assertEqual(cap["status"], 403)
 
 
 if __name__ == "__main__":

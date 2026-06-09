@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import socket
 import threading
+import traceback
 import webbrowser
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -22,8 +23,10 @@ from settings_store import read_settings, write_settings
 PORT = 8765
 URL = f"http://127.0.0.1:{PORT}/"
 
-# 런타임 데이터(API 키/DB/백업)는 정적 파일로 노출 금지 — /api/* 로만 접근
-BLOCKED_STATIC_PREFIXES = ("/data/db", "/data/backups", "/data/settings")
+# 런타임 데이터(API 키/DB/백업)는 정적 파일로 노출 금지 — /api/* 로만 접근.
+# deny-by-default: /data/ 전체를 차단하고, 프론트 시드 폴백에 필요한 파일만 명시 허용.
+BLOCKED_STATIC_PREFIX = "/data/"
+STATIC_DATA_ALLOWLIST = ("/data/clean.json",)  # app.jsx 시드 폴백 (소문자 비교)
 # 요청 본문 상한 (DB 저장용) — 메모리 보호
 MAX_BODY_BYTES = 64 * 1024 * 1024
 # /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
@@ -63,7 +66,9 @@ class Handler(SimpleHTTPRequestHandler):
         # Host 헤더가 로컬이 아니면 거부 (DNS rebinding 방어 — 공격자 도메인이 127.0.0.1로
         # 리바인딩돼도 Host 는 공격자 도메인이라 차단됨).
         host = (self.headers.get("Host") or "").strip().lower()
-        if host and host not in ALLOWED_HOSTS:
+        # 빈/누락 Host 도 거부 — 비브라우저 클라이언트의 Host 누락 차단(방어 강화).
+        # 브라우저 fetch 는 항상 Host 를 전송하므로 정상 경로 영향 없음.
+        if host not in ALLOWED_HOSTS:
             return False
         # Origin 이 있으면(=다른 사이트의 fetch 등) 로컬 출처와 일치해야 함 (CSRF 방어).
         origin = self.headers.get("Origin")
@@ -73,15 +78,25 @@ class Handler(SimpleHTTPRequestHandler):
         return True
 
     def is_blocked_static(self):
-        # 런타임 데이터(키/DB/백업)는 정적 파일로 노출 금지.
+        # /data/ 트리는 기본 차단(deny-by-default), 시드 파일만 명시 허용.
         # 퍼센트 인코딩 해제 + 소문자화로 인코딩·대소문자 우회 차단.
         decoded = unquote(urlparse(self.path).path).lower()
-        return decoded.startswith(BLOCKED_STATIC_PREFIXES)
+        if decoded in STATIC_DATA_ALLOWLIST:
+            return False
+        return decoded.startswith(BLOCKED_STATIC_PREFIX)
 
     def read_body_json(self):
+        # chunked 본문은 stdlib 핸들러가 디코드하지 않아 0바이트로 오인됨 → 명시 거부.
+        if (self.headers.get("Transfer-Encoding") or "").lower() == "chunked":
+            raise ValueError("chunked transfer-encoding not supported")
         # Content-Length 헤더를 신뢰하지 않고 실제 읽은 바이트로 상한 검증.
         # (헤더가 본문보다 작거나 위조된 경우 방어). 한 바이트 더 읽어 초과 판정.
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            raise ValueError("invalid Content-Length")
+        if length < 0:
+            raise ValueError("invalid Content-Length")
         if length > MAX_BODY_BYTES:
             raise ValueError(f"request body too large ({length} bytes)")
         raw = self.rfile.read(min(length, MAX_BODY_BYTES + 1))
@@ -158,8 +173,16 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.read_body_json() or {}
                 self.send_json(write_settings(data))
                 return
-        except Exception as e:
-            self.send_json({"error": str(e)}, 500)
+        except ValueError:
+            # JSONDecodeError·UnicodeDecodeError 는 ValueError 하위 → 본문 파싱/검증 오류
+            self.send_json({"error": "bad request"}, 400)
+            return
+        except FileNotFoundError:
+            self.send_json({"error": "not found"}, 404)
+            return
+        except Exception:
+            traceback.print_exc()  # 상세는 서버 로그에만, 응답엔 일반 메시지
+            self.send_json({"error": "internal error"}, 500)
             return
         self.send_json({"error": "not found"}, 404)
 

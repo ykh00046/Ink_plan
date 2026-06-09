@@ -546,9 +546,18 @@
     const m = s.match(/[A-Z0-9]*?(\d{2})(\d{2})\d{2}$/);
     if (!m) return fallbackDateISO || localDateISO();
     const base = parseDateLocal(fallbackDateISO) || new Date();
-    const yyyy = base.getFullYear();
-    const dateISO = `${yyyy}-${m[1]}-${m[2]}`;
-    return parseDateLocal(dateISO) ? dateISO : (fallbackDateISO || localDateISO());
+    // 연도는 fallback 기준이되, MM/DD가 fallback과 반년 이상 벌어지면
+    // 연말/연초 경계로 보고 인접 연도(±1) 중 base에 가장 가까운 해를 택한다.
+    // 예: 1월에 읽은 '1231…' LOT은 작년 12/31로, 12월에 읽은 '0101…'은 내년 1/1로 보정.
+    let best = null;
+    for (const yyyy of [base.getFullYear() - 1, base.getFullYear(), base.getFullYear() + 1]) {
+      const iso = `${yyyy}-${m[1]}-${m[2]}`;
+      const cand = parseDateLocal(iso);
+      if (!cand) continue;
+      const dist = Math.abs(cand.getTime() - base.getTime());
+      if (!best || dist < best.dist) best = { iso, dist };
+    }
+    return best ? best.iso : (fallbackDateISO || localDateISO());
   }
 
   function lotSequenceForDate(lots, inkName, dateISO) {
@@ -918,10 +927,11 @@
 
   // 정식 inkPlan + testInks 머지 — 같은 이름이면 정식 유지 + testStatus 칩만
   function mergeInkPlanAndTestInks(inkPlan, testInks, days) {
+    const list = inkPlan || [];
     const testMap = new Map((testInks || []).map(t => [t.name, t]));
-    const formalNames = new Set(inkPlan.map(i => i.name));
+    const formalNames = new Set(list.map(i => i.name));
 
-    const formal = inkPlan.map(i => {
+    const formal = list.map(i => {
       const t = testMap.get(i.name);
       return {
         ...i,

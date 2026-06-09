@@ -218,8 +218,8 @@ function ProductsPage({ ctx }) {
                     </button>
                   </td>
                 </tr>
-                {filtered.map((p, i) => (
-                  <tr key={p.name + i}>
+                {filtered.map((p) => (
+                  <tr key={p.name}>
                     <td>{p.factory ? <span className="tag">{p.factory}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
                     <td className="sticky-col" style={{ fontWeight: 500 }}>{p.name}</td>
                     <td>{p.type ? <span className="tag">{p.type}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>

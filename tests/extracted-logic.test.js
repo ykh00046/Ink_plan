@@ -120,6 +120,31 @@ test('mergeInkPlanAndTestInks: 정식 유지 + testStatus 칩, 미등록 testInk
   assert.deepEqual(Object.keys(neo.days), ['월', '화']);
 });
 
+test('mergeInkPlanAndTestInks: inkPlan이 null/undefined여도 throw하지 않는다', () => {
+  // 대시보드 never-throw 보장 경로: 부분/레거시 데이터 방어
+  assert.deepEqual(DataService.mergeInkPlanAndTestInks(null, [], ['월']), []);
+  assert.deepEqual(DataService.mergeInkPlanAndTestInks(undefined, null, ['월']), []);
+  // testInk만 있고 inkPlan이 없으면 testOnly 행만 생성
+  const merged = DataService.mergeInkPlanAndTestInks(
+    null,
+    [{ name: '신규', status: '대기', note: '', addedDate: '2026-06-01' }],
+    ['월'],
+  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].name, '신규');
+  assert.equal(merged[0].isTest, true);
+});
+
+test('mergeInkPlanAndTestInks: startDay는 매칭 testInk의 addedDate 요일에서 파생', () => {
+  // 2026-06-03은 수요일 → startDay '수'
+  const merged = DataService.mergeInkPlanAndTestInks(
+    [{ name: '빨강', days: {} }],
+    [{ name: '빨강', status: '테스트중', note: '', addedDate: '2026-06-03' }],
+    ['월', '화'],
+  );
+  assert.equal(merged.find(m => m.name === '빨강').startDay, '수');
+});
+
 // ── ink-plan: computeInkMetrics ──────────────────────────────────────────────
 test('computeInkMetrics: 수동 현재고 우선 + endStock carry 전파', () => {
   const days = ['월', '화'];
@@ -273,4 +298,119 @@ test('normalize 헬퍼: 단일화된 동작 검증', () => {
   assert.equal(DataService.normalizeBrand('갑/을'), '갑'); // 슬래시 앞부분
   assert.equal(DataService.inkOfAssignment({ ink: '빨강' }), '빨강');
   assert.equal(DataService.inkOfAssignment({ product: '파랑' }), '파랑');
+});
+
+// ── review/OCR: applyOcrToInjection (사출계획 기록 경로) ────────────────────────
+// 2026-06-03(수) 기준: requestDay='수', next_date 2026-06-04(목) → nextDay='목'
+function makeInjData() {
+  return {
+    injection: {
+      '3층': [{ machineNo: 1, schedule: {} }, { machineNo: 2, schedule: {} }],
+      '1층': [{ machineNo: 5, schedule: {} }],
+    },
+  };
+}
+const OCR_INJ = {
+  parsed: {
+    request_date: '2026-06-03',
+    next_date: '2026-06-04',
+    shifts: [
+      { shift: '주간', rows: [{ machine_no: 1, floor: '3F', product_name: 'P1' }] },
+      { shift: '야간', rows: [{ machine_no: 2, floor: '3F', product_name: 'P2' }] },
+      { shift: '명일주간', rows: [{ machine_no: 5, floor: '1F', product_name: 'P3' }] },
+    ],
+  },
+};
+
+test('applyOcrToInjection: 주간/야간/명일주간을 올바른 요일·시프트·호기에 기록', () => {
+  const data = makeInjData();
+  const decisions = {
+    '주간-1-0': { action: 'map' },          // target 없음 → r.product_name 사용
+    '야간-2-0': { action: 'map', target: 'P2X' },
+    '명일주간-5-0': { action: 'map' },
+  };
+  const res = DataService.applyOcrToInjection(data, OCR_INJ, decisions);
+  const inj = res.nextData.injection;
+  assert.equal(inj['3층'][0].schedule['수'].day, 'P1');    // 주간 → day
+  assert.equal(inj['3층'][1].schedule['수'].night, 'P2X'); // 야간 → night, target 우선
+  assert.equal(inj['1층'][0].schedule['목'].day, 'P3');    // 명일주간 → 익일(목) day
+  assert.deepEqual(res.mergedByShift, { 주간: 1, 야간: 1, 명일주간: 1 });
+  assert.equal(res.skippedNoMachine, 0);
+  assert.equal(res.skippedNoMatch, 0);
+  assert.deepEqual(res.mergedDays, ['수', '목']);
+});
+
+test('applyOcrToInjection: 원본 data.injection을 변형하지 않는다(깊은 복제)', () => {
+  const data = makeInjData();
+  const decisions = { '주간-1-0': { action: 'map' } };
+  DataService.applyOcrToInjection(data, OCR_INJ, decisions);
+  assert.deepEqual(data.injection['3층'][0].schedule, {}); // 원본 그대로
+});
+
+test('applyOcrToInjection: decision 없으면 skippedNoMatch 증가, 미기록', () => {
+  const data = makeInjData();
+  const res = DataService.applyOcrToInjection(data, OCR_INJ, {}); // 모든 행 decision 없음
+  assert.equal(res.skippedNoMatch, 3);
+  assert.deepEqual(res.mergedByShift, { 주간: 0, 야간: 0, 명일주간: 0 });
+});
+
+test('applyOcrToInjection: skip 결정은 미기록, 단 reason=TEST는 기록', () => {
+  const data = makeInjData();
+  const decisions = {
+    '주간-1-0': { action: 'skip', reason: 'NO_MATCH' },  // 미기록
+    '야간-2-0': { action: 'skip', reason: 'TEST' },       // 기록됨
+    '명일주간-5-0': { action: 'skip' },                   // 미기록
+  };
+  const res = DataService.applyOcrToInjection(data, OCR_INJ, decisions);
+  assert.equal(res.nextData.injection['3층'][0].schedule['수'], undefined); // skip
+  assert.equal(res.nextData.injection['3층'][1].schedule['수'].night, 'P2'); // TEST는 기록
+  assert.equal(res.mergedByShift['야간'], 1);
+});
+
+test('applyOcrToInjection: 매칭 호기 없으면 skippedNoMachine 증가', () => {
+  const data = makeInjData();
+  const ocr = {
+    parsed: {
+      request_date: '2026-06-03',
+      next_date: '2026-06-04',
+      shifts: [{ shift: '주간', rows: [{ machine_no: 99, floor: '3F', product_name: 'P1' }] }],
+    },
+  };
+  const res = DataService.applyOcrToInjection(data, ocr, { '주간-99-0': { action: 'map' } });
+  assert.equal(res.skippedNoMachine, 1);
+  assert.equal(res.mergedByShift['주간'], 0);
+});
+
+test('applyOcrToInjection: next_date 없으면 request_date+1로 익일 추론', () => {
+  const data = makeInjData();
+  const ocr = {
+    parsed: {
+      request_date: '2026-06-03', // 수 → 익일 목
+      shifts: [{ shift: '명일주간', rows: [{ machine_no: 5, floor: '1F', product_name: 'P3' }] }],
+    },
+  };
+  const res = DataService.applyOcrToInjection(data, ocr, { '명일주간-5-0': { action: 'map' } });
+  assert.equal(res.nextData.injection['1층'][0].schedule['목'].day, 'P3');
+  assert.deepEqual(res.mergedDays, ['수', '목']);
+});
+
+test('applyOcrToInjection: request_date 파싱 불가면 {error:no-request-day}', () => {
+  const data = makeInjData();
+  const ocr = { parsed: { request_date: 'INVALID', shifts: [] } };
+  const res = DataService.applyOcrToInjection(data, ocr, {});
+  assert.deepEqual(res, { error: 'no-request-day' });
+});
+
+test('applyOcrToInjection: floor 미지정이면 전체 층에서 호기 탐색', () => {
+  const data = makeInjData();
+  const ocr = {
+    parsed: {
+      request_date: '2026-06-03',
+      next_date: '2026-06-04',
+      shifts: [{ shift: '주간', rows: [{ machine_no: 5, product_name: 'P9' }] }], // floor 없음
+    },
+  };
+  const res = DataService.applyOcrToInjection(data, ocr, { '주간-5-0': { action: 'map' } });
+  assert.equal(res.nextData.injection['1층'][0].schedule['수'].day, 'P9');
+  assert.equal(res.skippedNoMachine, 0);
 });

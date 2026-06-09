@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -100,6 +101,23 @@ class StorageTest(unittest.TestCase):
             self.assertEqual(len(startup_left), 20)   # startup 은 20개로 캡
             self.assertEqual(len(important_left), 1)   # 오래됐어도 manual 은 보존
             self.assertEqual(removed, 5)
+
+
+    def test_list_backups_orders_by_mtime_not_filename(self):
+        with tempfile.TemporaryDirectory() as td:
+            backups = Path(td)
+            # 이름 역순 정렬이면 'zzz'가 먼저지만, 실제 수정시각은 'aaa'가 더 최신.
+            # mtime 기준 정렬이므로 'aaa'(최신)가 먼저 와야 한다.
+            older = backups / "2026-01-01_000000_zzz.json"
+            newer = backups / "2026-01-01_000000_aaa.json"
+            older.write_text("{}", encoding="utf-8")
+            newer.write_text("{}", encoding="utf-8")
+            os.utime(older, (1000, 1000))  # 과거
+            os.utime(newer, (2000, 2000))  # 최신
+            with patch.object(storage, "DB_DIR", backups), patch.object(storage, "BACKUP_DIR", backups):
+                result = storage.list_backups()
+            self.assertEqual(result[0].name, newer.name)  # 최신(mtime) 우선
+            self.assertEqual(result[1].name, older.name)
 
 
 if __name__ == "__main__":

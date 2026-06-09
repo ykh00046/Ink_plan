@@ -90,6 +90,24 @@ test('dateFromLotNo: 유효하지 않은 MMDD면 fallback 반환', () => {
   assert.equal(result, '2026-05-14');
 });
 
+test('dateFromLotNo: 1월에 읽은 12월 LOT은 작년으로 보정', () => {
+  // 1월 5일에 '1231…' LOT을 읽으면 올해 12/31(미래)이 아니라 작년 12/31이어야 함
+  const result = DataService.dateFromLotNo('SHAD123101', '2026-01-05');
+  assert.equal(result, '2025-12-31');
+});
+
+test('dateFromLotNo: 12월에 읽은 1월 LOT은 내년으로 보정', () => {
+  // 12월 30일에 '0101…' LOT을 읽으면 내년 1/1이 가장 가까움
+  const result = DataService.dateFromLotNo('SHAD010101', '2026-12-30');
+  assert.equal(result, '2027-01-01');
+});
+
+test('dateFromLotNo: 연중에는 fallback 연도를 그대로 사용', () => {
+  // 5월 14일 기준 05-13 LOT → 보정 없이 같은 해
+  const result = DataService.dateFromLotNo('SHAD051301', '2026-05-14');
+  assert.equal(result, '2026-05-13');
+});
+
 // ─────────────────────────────────────────────────────
 // lotSequenceForDate: 같은 잉크/날짜의 기존 LOT에서 다음 시퀀스 계산
 // ─────────────────────────────────────────────────────

@@ -19,3 +19,6 @@ data/settings.json
 
 # bkit 툴 런타임/상태 (프로젝트 코드 아님)
 .bkit/
+.pytest-tmp/
+.pytest_tmp/
+.tmp/

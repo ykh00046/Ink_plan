@@ -96,7 +96,18 @@ def create_backup(label=None, now=None):
 
 def list_backups():
     ensure_dirs()
-    return sorted(BACKUP_DIR.glob("*.json"), reverse=True)
+    # 파일명(타임스탬프)이 아닌 실제 수정시각 기준 최신순으로 정렬한다.
+    # 파일명 정렬은 _manual/_before_restore/-2 같은 접미사가 붙으면 시간순과
+    # 어긋나, 보존 로테이션이 의미 있는 백업을 먼저 지울 수 있다.
+    entries = []
+    for p in BACKUP_DIR.glob("*.json"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue  # 조회 중 삭제된 파일(TOCTOU)은 건너뜀
+        entries.append((mtime, p.name, p))
+    entries.sort(reverse=True)  # (mtime, name) 역순 — 동일 시각은 이름 역순 안정 정렬
+    return [p for _, _, p in entries]
 
 
 def read_backup(name):
