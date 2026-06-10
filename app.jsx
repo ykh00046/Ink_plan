@@ -493,7 +493,7 @@ function App() {
 const GEMINI_MODELS = [
   { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', meta: 'RPM 15 · RPD 500 · 한도 최대 (일상 권장)' },
   { value: 'gemini-3.5-flash',      label: 'Gemini 3.5 Flash',      meta: 'RPM 5 · RPD 20 · 최신, 표 정확도 기대' },
-  { value: 'gemini-3-flash',        label: 'Gemini 3 Flash',        meta: 'RPM 5 · RPD 20 · 신형' },
+  { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash',        meta: 'RPM 5 · RPD 20 · 신형(preview)' },
   { value: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash',      meta: 'RPM 5 · RPD 20 · 정확도 검증됨' },
   { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', meta: 'RPM 10 · RPD 20 · 빠름' },
 ];
