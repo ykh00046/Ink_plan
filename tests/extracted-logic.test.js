@@ -175,6 +175,43 @@ test('computeInkMetrics: 수동 현재고 우선 + endStock carry 전파', () =>
   assert.equal(tue.required, 3);
 });
 
+test('computeInkMetrics: availableDays(round1)·weeklyNeed(월·차주월 포함) 파생', () => {
+  // weeklyNeed/availableDays 는 부족 알림(collectInkShortage/auto-assign)의 단일 소스 — 부호·반올림 고정
+  const days = ['월', '화'];
+  const merged = [{ name: '빨강', days: { 월: { 현재고: '10' }, 화: {} } }];
+  const demand = new Map([['빨강', new Map([['월', 2], ['화', 3], ['차주월', 4]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
+  const mon = res.get('빨강').get('월');
+  assert.equal(mon.availableDays, 5);   // round1(10/2)
+  assert.equal(mon.weeklyNeed, 1);      // 10 - (2+3+4=9), 차주월 포함
+  const tue = res.get('빨강').get('화');
+  assert.equal(tue.stock, 8);           // carry 10+0-2
+  assert.equal(tue.availableDays, 2.7); // round1(8/3)
+  assert.equal(tue.weeklyNeed, null);   // 월이 아니면 null
+});
+
+test('computeInkMetrics: stock null이면 availableDays/weeklyNeed/carry 모두 null 전파', () => {
+  const days = ['월', '화'];
+  const merged = [{ name: '파랑', days: { 월: {}, 화: {} } }]; // 수동·재고 없음
+  const demand = new Map([['파랑', new Map([['월', 2], ['차주월', 1]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
+  const mon = res.get('파랑').get('월');
+  assert.equal(mon.stock, null);
+  assert.equal(mon.availableDays, null);
+  assert.equal(mon.weeklyNeed, null);                  // totalRequired>0여도 stock null이면 null
+  assert.equal(res.get('파랑').get('화').stock, null);  // carry null 전파
+});
+
+test('computeInkMetrics: required=0이면 availableDays=null (0 나눗셈 회피)', () => {
+  const days = ['월'];
+  const merged = [{ name: '빨강', days: { 월: { 현재고: '5' } } }];
+  const res = DataService.computeInkMetrics(merged, new Map(), new Map(), days);
+  const mon = res.get('빨강').get('월');
+  assert.equal(mon.required, 0);
+  assert.equal(mon.availableDays, null);
+  assert.equal(mon.weeklyNeed, null);  // totalRequired 0
+});
+
 test('computeInkMetrics: inventory 연동값은 stockFromInv=true', () => {
   const days = ['월'];
   const merged = [{ name: '빨강', days: { 월: {} } }];
