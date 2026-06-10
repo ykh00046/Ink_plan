@@ -8,10 +8,7 @@ function ProductsPage({ ctx }) {
   const [editing, setEditing] = useState(null);
   const [quickAdd, setQuickAdd] = useState({ factory: '', name: '', type: '', brand: '', inks: [null, null, null] });
 
-  const brands = useMemo(() => {
-    const s = new Set(data.products.map(p => p.brand).filter(Boolean));
-    return ['all', ...Array.from(s).sort()];
-  }, [data.products]);
+  const brands = useMemo(() => ['all', ...DataService.buildBrandOptions(data.products)], [data.products]);
 
   const factoryOptions = useMemo(() => {
     const s = new Set(['C관', 'S관']);

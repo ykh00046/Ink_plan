@@ -25,6 +25,19 @@ test('resolveProductIn: exact 우선, 없으면 normalized, 둘 다 없으면 nu
   assert.equal(DataService.resolveProductIn(lookup, ''), null);
 });
 
+test('buildBrandOptions: 빈값 제외·중복 제거·정렬 (injection/products 공용)', () => {
+  const products = [
+    { name: 'A', brand: '병' },
+    { name: 'B', brand: '갑' },
+    { name: 'C', brand: '갑' },   // 중복
+    { name: 'D', brand: '' },      // 빈값 제외
+    { name: 'E' },                 // brand 없음
+  ];
+  assert.deepEqual(DataService.buildBrandOptions(products), ['갑', '병']);
+  assert.deepEqual(DataService.buildBrandOptions([]), []);
+  assert.deepEqual(DataService.buildBrandOptions(null), []);
+});
+
 // ── ink-plan: buildProductsUsingInk / buildDemandByInkDay ────────────────────
 const SAMPLE_INJECTION = {
   '3층': [

@@ -836,6 +836,13 @@
       || null;
   }
 
+  // 제품 마스터에서 브랜드 옵션(빈값 제외·중복 제거·정렬) — injection/products 공용
+  function buildBrandOptions(products) {
+    const s = new Set();
+    for (const p of products || []) if (p.brand) s.add(p.brand);
+    return Array.from(s).sort();
+  }
+
   // 잉크 → 사출계획에서 이 잉크를 쓰는 제품 이름 목록
   function buildProductsUsingInk(injection, productLookup) {
     const map = new Map();
@@ -1351,6 +1358,7 @@
     // ink-plan 파생 엔진
     buildProductLookup,
     resolveProductIn,
+    buildBrandOptions,
     buildProductsUsingInk,
     buildDemandByInkDay,
     buildInkToMachine,

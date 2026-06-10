@@ -53,30 +53,9 @@ function InjectionPage({ ctx }) {
     return false;
   };
 
-  // 마스터 lookup (이름 → 제품)
-  const productByName = useMemo(() => {
-    const m = new Map();
-    for (const p of data.products) {
-      if (p.name) m.set(p.name, p);
-    }
-    return m;
-  }, [data.products]);
-
-  const normalizedProductByName = useMemo(() => {
-    const m = new Map();
-    for (const p of data.products) {
-      const key = normalizeProductName(p.name);
-      if (key && !m.has(key)) m.set(key, p);
-    }
-    return m;
-  }, [data.products]);
-
-  const resolveProduct = (value) => {
-    if (!value) return null;
-    const exact = productByName.get(value);
-    if (exact) return exact;
-    return normalizedProductByName.get(normalizeProductName(value)) || null;
-  };
+  // 마스터 lookup (이름 → 제품) — DataService 단일 로직에 위임 (ink-plan과 동일)
+  const productLookup = useMemo(() => DataService.buildProductLookup(data.products), [data.products]);
+  const resolveProduct = (value) => DataService.resolveProductIn(productLookup, value);
 
   // 셀 상태: 'ok' | 'new' | 'unregistered' | 'no-inks'
   const cellStatus = (value) => {
@@ -90,10 +69,7 @@ function InjectionPage({ ctx }) {
   };
 
   // 브랜드·잉크 후보 (ProductEditor용)
-  const brandsList = useMemo(() => {
-    const s = new Set(data.products.map(p => p.brand).filter(Boolean));
-    return Array.from(s).sort();
-  }, [data.products]);
+  const brandsList = useMemo(() => DataService.buildBrandOptions(data.products), [data.products]);
   const allInksList = useMemo(() => {
     const s = new Set();
     for (const p of data.products) for (const ink of (p.inks || [])) if (ink) s.add(ink);
@@ -209,7 +185,7 @@ function InjectionPage({ ctx }) {
       noInks,
       total: unregistered.size + noInks.size,
     };
-  }, [data.injection, productByName, normalizedProductByName, testSets]);
+  }, [data.injection, productLookup, testSets]);
 
   return (
     <div className="page">
