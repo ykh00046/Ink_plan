@@ -69,6 +69,11 @@ def read_current():
         return read_json(CURRENT_FILE)
 
 
+def read_seed():
+    # 시드 스냅샷(clean.json) — 정적 노출 대신 /api/seed 로만 제공
+    return read_json(SEED_FILE)
+
+
 def write_current(data):
     with _LOCK:
         ensure_current()

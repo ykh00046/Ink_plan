@@ -1,9 +1,10 @@
 // Shared UI primitives + icons (global window scope for cross-file React access)
 
-const Icon = ({ name, size = 16 }) => {
-  const stroke = 'currentColor';
-  const sw = 1.8;
-  const paths = {
+// 모듈 스코프 상수 — Icon 렌더마다 paths 객체(+JSX 30종)가 재생성되지 않도록 호이스팅
+const ICON_STROKE = 'currentColor';
+const ICON_PATHS = (() => {
+  const stroke = ICON_STROKE;
+  return {
     dashboard: <><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></>,
     injection: <><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><circle cx="7" cy="7" r="1" fill={stroke}/><circle cx="7" cy="17" r="1" fill={stroke}/></>,
     ink: <><path d="M12 3v6"/><path d="M8 9h8l-1 11H9z"/><path d="M10 13h4"/></>,
@@ -35,12 +36,13 @@ const Icon = ({ name, size = 16 }) => {
     flask: <><path d="M10 2v6L5 18a2 2 0 0 0 1.8 2.8h10.4A2 2 0 0 0 19 18l-5-10V2"/><path d="M8 2h8"/></>,
     history: <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></>,
   };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      {paths[name] || null}
-    </svg>
-  );
-};
+})();
+
+const Icon = ({ name, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={ICON_STROKE} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    {ICON_PATHS[name] || null}
+  </svg>
+);
 
 const Pill = ({ tone = 'default', children, dot = false }) => (
   <span className={`pill ${tone === 'default' ? '' : 'pill--' + tone}`}>
@@ -319,4 +321,19 @@ const fmtNum = (v) => {
   return n.toLocaleString();
 };
 
-Object.assign(window, { Icon, Pill, Card, Modal, Toast, Seg, stockStatus, heatLevel, fmtNum });
+// Enter 시 같은 컬럼(data-focuscol)의 다음 input 으로 포커스 이동 — ink-plan/inventory 공용.
+// td 위치 인덱스 순회 대신 명시적 컬럼 키 + 문서 순서를 쓰므로 colSpan·래퍼·
+// 중간 행(합계/relabel 등) 마크업 변화에 영향을 받지 않는다.
+// 같은 셀에 input 이 여럿이면(재고 lot) 문서 순서상 셀 내부 → 다음 행 순으로 자연 이동.
+function focusNextInColumn(input) {
+  const col = input && input.dataset ? input.dataset.focuscol : null;
+  if (!col) { if (input) input.blur(); return; }
+  const scope = input.closest('table') || document;
+  const candidates = Array.from(
+    scope.querySelectorAll(`input[data-focuscol="${CSS.escape(col)}"]`)
+  ).filter(el => !el.disabled);
+  const next = candidates[candidates.indexOf(input) + 1];
+  if (next) { next.focus(); next.select(); } else { input.blur(); }
+}
+
+Object.assign(window, { Icon, Pill, Card, Modal, Toast, Seg, stockStatus, heatLevel, fmtNum, focusNextInColumn });

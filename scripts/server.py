@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from storage import (
     ASSET_ROOT,
     read_current,
+    read_seed,
     write_current,
     write_current_checked,
     compute_rev,
@@ -26,10 +27,9 @@ from settings_store import read_settings, write_settings
 PORT = 8765
 URL = f"http://127.0.0.1:{PORT}/"
 
-# 런타임 데이터(API 키/DB/백업)는 정적 파일로 노출 금지 — /api/* 로만 접근.
-# deny-by-default: /data/ 전체를 차단하고, 프론트 시드 폴백에 필요한 파일만 명시 허용.
+# 런타임 데이터(API 키/DB/백업/시드)는 정적 파일로 노출 금지 — /api/* 로만 접근.
+# deny-by-default: /data/ 전체 차단. 시드(clean.json)도 /api/seed 로만 제공.
 BLOCKED_STATIC_PREFIX = "/data/"
-STATIC_DATA_ALLOWLIST = ("/data/clean.json",)  # app.jsx 시드 폴백 (소문자 비교)
 # 요청 본문 상한 (DB 저장용) — 메모리 보호
 MAX_BODY_BYTES = 64 * 1024 * 1024
 # /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
@@ -89,11 +89,9 @@ class Handler(SimpleHTTPRequestHandler):
         return True
 
     def is_blocked_static(self):
-        # /data/ 트리는 기본 차단(deny-by-default), 시드 파일만 명시 허용.
+        # /data/ 트리는 전면 차단(deny-by-default) — 시드 포함 전부 /api/* 로만.
         # 퍼센트 인코딩 해제 + 소문자화로 인코딩·대소문자 우회 차단.
         decoded = unquote(urlparse(self.path).path).lower()
-        if decoded in STATIC_DATA_ALLOWLIST:
-            return False
         return decoded.startswith(BLOCKED_STATIC_PREFIX)
 
     def read_body_json(self):
@@ -145,6 +143,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/settings":
             self.send_json(read_settings())
+            return
+        if path == "/api/seed":
+            # 시드 스냅샷(clean.json) — /api/db 실패 시 프론트 폴백용. 정적 노출 대체.
+            try:
+                self.send_json(read_seed())
+            except FileNotFoundError:
+                self.send_json({"error": "seed not found"}, 404)
             return
         # 런타임 데이터 디렉터리는 정적 파일로 직접 서빙하지 않음
         if self.is_blocked_static():

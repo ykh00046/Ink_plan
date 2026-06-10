@@ -8,20 +8,8 @@
 
 const INKPLAN_DAYS = DataService.WEEKDAYS; // 요일 단일 출처(data-service.js)
 
-// 같은 컬럼의 다음 row input으로 focus 이동
-function focusNextCellInColumn(currentInput) {
-  const cell = currentInput.closest('td');
-  if (!cell) return;
-  const row = cell.parentElement;
-  const cellIdx = Array.from(row.children).indexOf(cell);
-  let next = row.nextElementSibling;
-  while (next) {
-    const inp = next.children[cellIdx]?.querySelector('input');
-    if (inp && !inp.disabled) { inp.focus(); inp.select(); return; }
-    next = next.nextElementSibling;
-  }
-  currentInput.blur();
-}
+// 같은 컬럼의 다음 row input으로 focus 이동 — ui.jsx 공용 focusNextInColumn 사용
+// (data-focuscol 명시 키 기반: td 위치 인덱스 순회의 colSpan/마크업 취약성 제거)
 
 // ── 모듈 스코프 순수 파생 함수 ───────────────────────────────────────────────
 // 모두 입력만 받아 새 자료구조를 반환 — 컴포넌트 안 useMemo 에서 호출.
@@ -140,6 +128,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
             >
               <CellNumInput
                 value={displayStock}
+                focusCol={`${d}:현재고`}
                 onCommit={v => onUpdateCell(ink.name, d, '현재고', v)}
               />
             </td>
@@ -170,6 +159,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
             }}>
               <CellNumInput
                 value={dd['제조량']}
+                focusCol={`${d}:제조량`}
                 onCommit={v => onUpdateCell(ink.name, d, '제조량', v)}
               />
             </td>
@@ -563,7 +553,7 @@ function InkNameCell({ name, usedBy, testStatus, statusTone }) {
 // - type="text" + inputMode="decimal" 으로 spinner(화살표) 없음, 숫자만 허용
 // - Enter → 같은 컬럼의 다음 row input으로 focus 이동 (blur 자동 트리거 → commit)
 // - 값이 외부에서 바뀌면 자동 동기화
-function CellNumInput({ value, onCommit }) {
+function CellNumInput({ value, onCommit, focusCol }) {
   const [v, setV] = useState(value == null ? '' : String(value));
   useEffect(() => { setV(value == null ? '' : String(value)); }, [value]);
 
@@ -581,6 +571,7 @@ function CellNumInput({ value, onCommit }) {
       className="inkplan-cellinp inkplan-cellinp--num"
       value={v}
       placeholder="·"
+      data-focuscol={focusCol}
       onChange={e => {
         const raw = e.target.value;
         if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) setV(raw);
@@ -589,7 +580,7 @@ function CellNumInput({ value, onCommit }) {
       onKeyDown={e => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          focusNextCellInColumn(e.currentTarget);
+          focusNextInColumn(e.currentTarget);
         } else if (e.key === 'Escape') {
           setV(value == null ? '' : String(value));
           e.currentTarget.blur();
@@ -602,7 +593,7 @@ function CellNumInput({ value, onCommit }) {
 
 // ── 셀 component: 엑셀식 항상 input 셀 — 텍스트 ──────────────────────────────
 // 현재 사용처 없음. 향후 다른 자유텍스트 셀이 필요할 때 재사용 가능하도록 보존.
-function CellTextInput({ value, onCommit, listId }) {
+function CellTextInput({ value, onCommit, listId, focusCol }) {
   const [v, setV] = useState(value || '');
   useEffect(() => { setV(value || ''); }, [value]);
 
@@ -618,12 +609,13 @@ function CellTextInput({ value, onCommit, listId }) {
       className="inkplan-cellinp inkplan-cellinp--text"
       value={v}
       placeholder="·"
+      data-focuscol={focusCol}
       onChange={e => setV(e.target.value)}
       onBlur={commit}
       onKeyDown={e => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          focusNextCellInColumn(e.currentTarget);
+          focusNextInColumn(e.currentTarget);
         } else if (e.key === 'Escape') {
           setV(value || '');
           e.currentTarget.blur();

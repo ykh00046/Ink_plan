@@ -57,28 +57,8 @@ function invDaysBetween(fromISO, toISO) {
 // LOT 잔여 유효기간 계산은 data-service.js로 이전됨 (R3-1순위)
 const invInkLifeInfo = DataService.inkLifeInfo;
 
-// 입력 셀 안에서 다음 input으로 focus 이동. cell 내부 input 먼저, 없으면 같은 컬럼의 다음 행.
-function invFocusNextInCol(input) {
-  const cell = input.closest('td');
-  if (!cell) return;
-  const cellInputs = Array.from(cell.querySelectorAll('input'));
-  const myIdx = cellInputs.indexOf(input);
-  if (myIdx >= 0 && myIdx < cellInputs.length - 1) {
-    const next = cellInputs[myIdx + 1];
-    next.focus(); next.select();
-    return;
-  }
-  const row = cell.parentElement;
-  const cellIdx = Array.from(row.children).indexOf(cell);
-  let nextRow = row.nextElementSibling;
-  while (nextRow) {
-    const cellTd = nextRow.children[cellIdx];
-    const inp = cellTd?.querySelector('input');
-    if (inp && !inp.disabled) { inp.focus(); inp.select(); return; }
-    nextRow = nextRow.nextElementSibling;
-  }
-  input.blur();
-}
+// 다음 input 포커스 이동은 ui.jsx 공용 focusNextInColumn(data-focuscol=dateISO) 사용.
+// 같은 셀의 lot input 여럿 → 문서 순서상 셀 내부 먼저, 그다음 행 — 기존 동작과 동일.
 
 // ── 인쇄 스타일 ──────────────────────────────────────────────────────────────
 // 페이지 마운트 시 1회만 <style>을 head에 삽입.
@@ -209,11 +189,12 @@ function InventoryRow({
                         type="number"
                         min="0"
                         value={v === undefined ? '' : v}
+                        data-focuscol={dateISO}
                         onChange={e => onSetStock(lot.id, dateISO, e.target.value)}
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            invFocusNextInCol(e.currentTarget);
+                            focusNextInColumn(e.currentTarget);
                           }
                         }}
                       />

@@ -104,7 +104,7 @@ function App() {
   const lastSyncedRef = useRef(null); // 마지막으로 서버와 일치한 data — 3-way 병합·skip 의 base
   const [conflictState, setConflictState] = useState(null); // {local,server,serverRev,conflictKeys}|null
 
-  // 초기 로드: 파일 DB API 우선, 실패하면 localStorage/clean.json fallback
+  // 초기 로드: 파일 DB API 우선, 실패하면 localStorage → /api/seed fallback
   useEffect(() => {
     const safeMigrate = (raw, source) => {
       try {
@@ -131,18 +131,18 @@ function App() {
         console.error('[init] localStorage 파싱 실패:', e);
       }
 
-      fetch('data/clean.json')
+      fetch('/api/seed', { cache: 'no-store' })
         .then(r => {
           if (!r.ok) throw new Error(`fetch ${r.status}`);
           return r.json();
         })
         .then(raw => {
-          const migrated = safeMigrate(raw, 'clean.json');
+          const migrated = safeMigrate(raw, 'seed-api');
           setData(migrated);
-          console.log('[init] clean.json에서 로드');
+          console.log('[init] 시드(/api/seed)에서 로드');
         })
         .catch(e => {
-          console.error('[init] clean.json 로드 실패:', e);
+          console.error('[init] 시드 로드 실패:', e);
           setData({ products: [], inkPlan: [], inkAdd: [], injection: { '3층': [], '1층': [] }, testInks: [], machineAssignments: [] });
         });
     };

@@ -117,16 +117,13 @@ class BlockedStaticTest(unittest.TestCase):
     def test_settings_path_blocked(self):
         self.assertTrue(make_handler(path="/data/settings.json").is_blocked_static())
 
-    def test_clean_json_seed_allowed(self):
-        # 프론트 시드 폴백(app.jsx) 에 필요 → 명시 허용
-        self.assertFalse(make_handler(path="/data/clean.json").is_blocked_static())
-
-    def test_clean_json_uppercase_allowed(self):
-        # 대소문자 무관 허용
-        self.assertFalse(make_handler(path="/DATA/CLEAN.JSON").is_blocked_static())
+    def test_clean_json_blocked(self):
+        # 시드도 정적 노출 금지 — /api/seed 로만 제공 (seed-via-api)
+        self.assertTrue(make_handler(path="/data/clean.json").is_blocked_static())
+        self.assertTrue(make_handler(path="/DATA/CLEAN.JSON").is_blocked_static())
 
     def test_sheets_json_blocked(self):
-        # deny-by-default — allowlist 외 /data/ 파일은 차단(이전엔 노출됐음)
+        # deny-by-default — /data/ 전체 차단(이전엔 노출됐음)
         self.assertTrue(make_handler(path="/data/sheets.json").is_blocked_static())
 
     def test_normal_asset_allowed(self):
@@ -285,6 +282,40 @@ class DbRevisionTest(unittest.TestCase):
             finally:
                 for p in patches:
                     p.stop()
+
+
+class SeedApiTest(unittest.TestCase):
+    """GET /api/seed — 시드(clean.json)를 정적 노출 대신 API 로 제공."""
+
+    def test_get_seed_returns_seed_content(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            (Path(td) / "clean.json").write_text(
+                json.dumps({"seed": True}), encoding="utf-8")
+            for p in patches:
+                p.start()
+            try:
+                h, cap = make_get_handler("/api/seed")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(cap["status"], 200)
+            self.assertEqual(cap["payload"], {"seed": True})
+
+    def test_get_seed_missing_file_404(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            (Path(td) / "clean.json").unlink()  # 시드 제거
+            for p in patches:
+                p.start()
+            try:
+                h, cap = make_get_handler("/api/seed")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(cap["status"], 404)
 
 
 if __name__ == "__main__":
