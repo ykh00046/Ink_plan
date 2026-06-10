@@ -1252,6 +1252,57 @@
     };
   }
 
+  // ── 다중 탭 동시편집 3-way 병합 (concurrent-edit-guard) ──────────────────────
+  // 전체 스냅샷 저장 모델에서 top-level 섹션(products/inkPlan/injection/…) 단위로
+  // base(마지막 동기화본)·local(내 편집)·server(최신본)를 비교한다. 키 순서 무관
+  // 정규화 비교(stableEqual)는 서버 compute_rev(sort_keys)의 "내용 동일" 개념과 일치.
+  function stableStringify(v) {
+    if (v === undefined) return 'null';
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+    return '{' + Object.keys(v).sort().map(function (k) {
+      return JSON.stringify(k) + ':' + stableStringify(v[k]);
+    }).join(',') + '}';
+  }
+
+  function stableEqual(a, b) {
+    return stableStringify(a) === stableStringify(b);
+  }
+
+  // base 대비 local·server 의 섹션 변경을 합친다.
+  //  · local==server            → status:'identical' (rev 만 동기화하면 됨)
+  //  · 한쪽만 바뀐 섹션뿐         → status:'merged'  (data = 무손실 자동 병합)
+  //  · 양쪽이 다르게 바뀐 섹션 존재 → status:'conflict' (conflictKeys, 사용자 선택)
+  // data 는 비충돌 섹션을 합치고 충돌 섹션은 잠정적으로 local 값을 담는다.
+  function resolveConcurrentEdit(base, local, server) {
+    base = base || {}; local = local || {}; server = server || {};
+    if (stableEqual(local, server)) {
+      return { status: 'identical', data: server, conflictKeys: [] };
+    }
+    var keys = Object.keys(base)
+      .concat(Object.keys(local), Object.keys(server))
+      .filter(function (k, i, a) { return a.indexOf(k) === i; });
+    var data = {}, conflictKeys = [];
+    keys.forEach(function (k) {
+      var b = base[k], l = local[k], s = server[k];
+      var localChanged = !stableEqual(l, b);
+      var serverChanged = !stableEqual(s, b);
+      if (localChanged && serverChanged && !stableEqual(l, s)) {
+        conflictKeys.push(k);
+        data[k] = l;            // 잠정 local — 진짜 해소는 모달 선택(full server/full local)
+      } else if (localChanged) {
+        data[k] = l;
+      } else {
+        data[k] = s;
+      }
+    });
+    return {
+      status: conflictKeys.length ? 'conflict' : 'merged',
+      data: data,
+      conflictKeys: conflictKeys,
+    };
+  }
+
   return {
     getInjectionColumns,
     moveInjectionCell,
@@ -1288,6 +1339,9 @@
     cascadeProductsInBrand,
     cascadeInksInProduct,
     filterByQuery,
+    // 다중 탭 동시편집 가드 (순수 함수)
+    stableEqual,
+    resolveConcurrentEdit,
     // 공유 normalize 헬퍼
     normalizeProductName,
     normalizeBrand,

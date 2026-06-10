@@ -735,3 +735,43 @@ test('buildChemicalRequestMeta: rangeLabel 그대로 전달', () => {
   const m = DataService.buildChemicalRequestMeta(CR_TOTALS, '오늘(화요일) · 야간 · 3F만', '김선명', '2026-06-08');
   assert.equal(m.rangeLabel, '오늘(화요일) · 야간 · 3F만');
 });
+
+// ── 다중 탭 동시편집 가드 (concurrent-edit-guard) ──────────────────────────────
+test('stableEqual: 키 순서 무관 동일, 내용 변경 감지', () => {
+  assert.equal(DataService.stableEqual({ a: 1, b: [2, 3] }, { b: [2, 3], a: 1 }), true);
+  assert.equal(DataService.stableEqual({ a: 1 }, { a: 2 }), false);
+  assert.equal(DataService.stableEqual([1, 2], [1, 2]), true);
+  assert.equal(DataService.stableEqual(null, null), true);
+});
+
+test('resolveConcurrentEdit: local==server → identical', () => {
+  const r = DataService.resolveConcurrentEdit({ products: [1] }, { products: [2] }, { products: [2] });
+  assert.equal(r.status, 'identical');
+  assert.deepEqual(r.conflictKeys, []);
+});
+
+test('resolveConcurrentEdit: 서로 다른 섹션 편집 → merged(무손실 자동 병합)', () => {
+  const base = { products: [1], inkPlan: ['a'] };
+  const local = { products: [1, 2], inkPlan: ['a'] };      // 내가 products 변경
+  const server = { products: [1], inkPlan: ['a', 'b'] };   // 다른 탭이 inkPlan 변경
+  const r = DataService.resolveConcurrentEdit(base, local, server);
+  assert.equal(r.status, 'merged');
+  assert.deepEqual(r.conflictKeys, []);
+  assert.deepEqual(r.data.products, [1, 2]);     // 내 변경 유지
+  assert.deepEqual(r.data.inkPlan, ['a', 'b']);  // 서버 변경 흡수
+});
+
+test('resolveConcurrentEdit: 같은 섹션 양쪽 변경 → conflict', () => {
+  const base = { products: [1] };
+  const local = { products: [1, 2] };
+  const server = { products: [1, 3] };
+  const r = DataService.resolveConcurrentEdit(base, local, server);
+  assert.equal(r.status, 'conflict');
+  assert.deepEqual(r.conflictKeys, ['products']);
+});
+
+test('resolveConcurrentEdit: base/local/server null-safe', () => {
+  const r = DataService.resolveConcurrentEdit(null, { products: [1] }, {});
+  assert.equal(r.status, 'merged');
+  assert.deepEqual(r.data.products, [1]);
+});

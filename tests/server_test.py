@@ -5,6 +5,8 @@ self.headers 와 self.path 만 읽으므로, 소켓 바인딩(__init__)을 우�
 Handler.__new__(Handler) 인스턴스에 헤더/경로만 주입해 단위 검증한다.
 """
 import io
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +14,7 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import server
+import storage
 
 
 def make_handler(headers=None, path="/"):
@@ -31,8 +34,40 @@ def make_post_handler(body=b"", headers=None, path="/api/db"):
     h.path = path
     h.rfile = io.BytesIO(body)
     cap = {}
-    h.send_json = lambda payload, status=200: cap.update(status=status, payload=payload)
+    h.send_json = lambda payload, status=200, headers=None: cap.update(
+        status=status, payload=payload, headers=headers or {})
     return h, cap
+
+
+def make_get_handler(path="/api/db", headers=None):
+    """do_GET 단위 검증용 — send_json 스텁으로 status/payload/headers 캡처."""
+    h = server.Handler.__new__(server.Handler)
+    base = {"Host": "127.0.0.1"}
+    base.update(headers or {})
+    h.headers = base
+    h.path = path
+    cap = {}
+    h.send_json = lambda payload, status=200, headers=None: cap.update(
+        status=status, payload=payload, headers=headers or {})
+    return h, cap
+
+
+def _patch_storage(td, content):
+    """storage 경로를 임시 디렉터리로 격리(실데이터 보호)하고 current.json 시드."""
+    db = Path(td) / "db"
+    backups = Path(td) / "backups"
+    seed = Path(td) / "clean.json"
+    db.mkdir()
+    backups.mkdir()
+    seed.write_text("{}", encoding="utf-8")
+    current = db / "current.json"
+    current.write_text(json.dumps(content), encoding="utf-8")
+    return [
+        patch.object(storage, "DB_DIR", db),
+        patch.object(storage, "BACKUP_DIR", backups),
+        patch.object(storage, "SEED_FILE", seed),
+        patch.object(storage, "CURRENT_FILE", current),
+    ], current
 
 
 class ApiGuardTest(unittest.TestCase):
@@ -178,6 +213,78 @@ class PostErrorMappingTest(unittest.TestCase):
         h, cap = make_post_handler(b'{"a":1}', headers={"Host": "evil.com"}, path="/api/db")
         h.do_POST()
         self.assertEqual(cap["status"], 403)
+
+
+class DbRevisionTest(unittest.TestCase):
+    """ETag/If-Match 낙관적 동시성(OCC) — GET ETag 노출, POST 409 충돌."""
+
+    def test_get_db_includes_etag_header(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"products": [1]})
+            for p in patches:
+                p.start()
+            try:
+                h, cap = make_get_handler("/api/db")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(cap["status"], 200)
+            self.assertIn("ETag", cap["headers"])
+            expected = storage.compute_rev({"products": [1]})
+            self.assertEqual(cap["headers"]["ETag"], f'"{expected}"')
+
+    def test_post_matching_if_match_writes_200_with_rev(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                rev = storage.compute_rev(storage.read_json(current))
+                body = json.dumps({"v": 2}).encode("utf-8")
+                h, cap = make_post_handler(body, headers={"If-Match": f'"{rev}"'}, path="/api/db")
+                h.do_POST()
+                self.assertEqual(cap["status"], 200)
+                self.assertIn("rev", cap["payload"])
+                self.assertEqual(storage.read_json(current)["v"], 2)
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_post_stale_if_match_returns_409(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps({"v": 2}).encode("utf-8")
+                h, cap = make_post_handler(
+                    body, headers={"If-Match": '"stalerev0000"'}, path="/api/db")
+                h.do_POST()
+                self.assertEqual(cap["status"], 409)
+                self.assertEqual(cap["payload"]["error"], "conflict")
+                self.assertIn("rev", cap["payload"])
+                # 충돌 시 파일은 보존(lost-update 차단)
+                self.assertEqual(storage.read_json(current)["v"], 1)
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_post_without_if_match_writes_200(self):
+        # If-Match 부재 → 무조건 기록(폴백/레거시 호환)
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps({"v": 7}).encode("utf-8")
+                h, cap = make_post_handler(body, path="/api/db")
+                h.do_POST()
+                self.assertEqual(cap["status"], 200)
+                self.assertEqual(storage.read_json(current)["v"], 7)
+            finally:
+                for p in patches:
+                    p.stop()
 
 
 if __name__ == "__main__":

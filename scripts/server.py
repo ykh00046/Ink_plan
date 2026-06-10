@@ -11,6 +11,9 @@ from storage import (
     ASSET_ROOT,
     read_current,
     write_current,
+    write_current_checked,
+    compute_rev,
+    ConflictError,
     create_backup,
     list_backups,
     read_backup,
@@ -53,14 +56,22 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, headers=None):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
+        if headers:
+            for key, value in headers.items():
+                self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _if_match_rev(self):
+        # If-Match 헤더(따옴표 포함 ETag)에서 base 리비전 추출. 없으면 None → 무조건 기록.
+        raw = self.headers.get("If-Match")
+        return raw.strip().strip('"') if raw else None
 
     def is_api_request_allowed(self):
         # Host 헤더가 로컬이 아니면 거부 (DNS rebinding 방어 — 공격자 도메인이 127.0.0.1로
@@ -112,7 +123,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "forbidden"}, 403)
             return
         if path == "/api/db":
-            self.send_json(read_current())
+            data = read_current()
+            # ETag = 현재 내용 리비전 — 클라이언트가 이후 저장 시 If-Match 로 되돌려 OCC 성립.
+            self.send_json(data, headers={"ETag": f'"{compute_rev(data)}"'})
             return
         if path == "/api/backups":
             self.send_json([
@@ -156,8 +169,10 @@ class Handler(SimpleHTTPRequestHandler):
                 if not isinstance(data, dict):
                     self.send_json({"error": "invalid json"}, 400)
                     return
-                write_current(data)
-                self.send_json({"ok": True})
+                # If-Match 기준 리비전과 현재 rev 가 일치할 때만 기록(OCC). 없으면 무조건 기록.
+                new_rev = write_current_checked(data, self._if_match_rev())
+                self.send_json({"ok": True, "rev": new_rev},
+                               headers={"ETag": f'"{new_rev}"'})
                 return
             if self.path == "/api/backup":
                 target = create_backup("manual")
@@ -173,6 +188,11 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.read_body_json() or {}
                 self.send_json(write_settings(data))
                 return
+        except ConflictError as exc:
+            # 다른 탭/창이 먼저 저장 → lost-update 차단. 현재 rev 를 함께 돌려 클라가 정합화.
+            self.send_json({"error": "conflict", "rev": exc.current_rev}, 409,
+                           headers={"ETag": f'"{exc.current_rev}"'})
+            return
         except ValueError:
             # JSONDecodeError·UnicodeDecodeError 는 ValueError 하위 → 본문 파싱/검증 오류
             self.send_json({"error": "bad request"}, 400)

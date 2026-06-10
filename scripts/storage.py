@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -72,6 +73,43 @@ def write_current(data):
     with _LOCK:
         ensure_current()
         write_json_atomic(CURRENT_FILE, data)
+
+
+class ConflictError(Exception):
+    """낙관적 동시성 제어(OCC): base_rev 가 현재 rev 와 불일치.
+    다른 탭/창이 먼저 저장해 lost-update 가 발생할 상황을 의미한다."""
+
+    def __init__(self, current_rev):
+        super().__init__("revision conflict")
+        self.current_rev = current_rev
+
+
+def compute_rev(data):
+    # 내용 기반 리비전(content hash) — 카운터 파일/데이터 모델 오염 없이 재시작에도 안정.
+    # 키 순서 무관 정규화 후 해시 → 동일 내용은 동일 rev(멱등). 16자 절단으로 충분.
+    canonical = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()[:16]
+
+
+def current_rev():
+    with _LOCK:
+        ensure_current()
+        return compute_rev(read_json(CURRENT_FILE))
+
+
+def write_current_checked(data, base_rev):
+    # base_rev=None 이면 무조건 기록(시드 폴백/레거시 클라이언트 호환).
+    # 값이 있으면 현재 rev 와 일치할 때만 기록, 불일치 시 ConflictError 로 거부한다.
+    # read-rev→compare→write 를 단일 _LOCK 안에서 수행해 TOCTOU 를 차단한다.
+    with _LOCK:
+        ensure_current()
+        cur = compute_rev(read_json(CURRENT_FILE))
+        if base_rev is not None and base_rev != cur:
+            raise ConflictError(cur)
+        write_json_atomic(CURRENT_FILE, data)
+        return compute_rev(data)
 
 
 def backup_name(now=None):

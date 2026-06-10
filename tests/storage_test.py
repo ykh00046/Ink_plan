@@ -120,5 +120,58 @@ class StorageTest(unittest.TestCase):
             self.assertEqual(result[1].name, older.name)
 
 
+class OptimisticConcurrencyTest(unittest.TestCase):
+    """compute_rev / write_current_checked — 다중 탭 lost-update 방지(OCC)."""
+
+    def _setup_current(self, td, content):
+        db = Path(td) / "db"
+        backups = Path(td) / "backups"
+        seed = Path(td) / "clean.json"
+        db.mkdir()
+        backups.mkdir()
+        seed.write_text("{}", encoding="utf-8")
+        current = db / "current.json"
+        current.write_text(json.dumps(content), encoding="utf-8")
+        return db, backups, seed, current
+
+    def test_compute_rev_is_key_order_independent(self):
+        # 키 순서가 달라도 내용이 같으면 동일 rev (멱등)
+        self.assertEqual(
+            storage.compute_rev({"a": 1, "b": [2, 3]}),
+            storage.compute_rev({"b": [2, 3], "a": 1}),
+        )
+
+    def test_compute_rev_changes_on_content_change(self):
+        self.assertNotEqual(storage.compute_rev({"v": 1}), storage.compute_rev({"v": 2}))
+
+    def test_checked_write_with_matching_rev_succeeds(self):
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(td, {"v": 1})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current):
+                base = storage.compute_rev(storage.read_json(current))
+                new_rev = storage.write_current_checked({"v": 2}, base)
+                self.assertEqual(storage.read_json(current)["v"], 2)
+                self.assertEqual(new_rev, storage.compute_rev({"v": 2}))
+
+    def test_checked_write_with_stale_rev_raises_and_keeps_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(td, {"v": 1})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current):
+                with self.assertRaises(storage.ConflictError) as ctx:
+                    storage.write_current_checked({"v": 2}, "stalerev0000")
+                # 충돌 응답에 현재 rev 동반
+                self.assertEqual(ctx.exception.current_rev, storage.compute_rev({"v": 1}))
+                # 파일은 덮어쓰이지 않음 (lost-update 차단)
+                self.assertEqual(storage.read_json(current)["v"], 1)
+
+    def test_checked_write_none_base_is_unconditional(self):
+        # base_rev=None → 폴백/레거시 호환: 무조건 기록
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(td, {"v": 1})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current):
+                storage.write_current_checked({"v": 9}, None)
+                self.assertEqual(storage.read_json(current)["v"], 9)
+
+
 if __name__ == "__main__":
     unittest.main()

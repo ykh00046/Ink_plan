@@ -80,7 +80,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 56;
+const APP_REV = 57;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -100,6 +100,9 @@ function App() {
   const [ocrResult, setOcrResult] = useState(null); // { parsed, sourceImageUrl(data URL), sourceFileName, parsedAt, model } - 검수 페이지로 전달
   const [lastMergeInfo, setLastMergeInfo] = useState(null); // { days: ['수','목'], at: Date.now() } - 사출계획에서 자동 요일 확장 트리거
   const toastTimer = useRef(null);
+  const dbRevRef = useRef(null);      // 서버 DB 리비전(ETag) — 다중 탭 OCC 의 base
+  const lastSyncedRef = useRef(null); // 마지막으로 서버와 일치한 data — 3-way 병합·skip 의 base
+  const [conflictState, setConflictState] = useState(null); // {local,server,serverRev,conflictKeys}|null
 
   // 초기 로드: 파일 DB API 우선, 실패하면 localStorage/clean.json fallback
   useEffect(() => {
@@ -146,10 +149,13 @@ function App() {
     fetch('/api/db', { cache: 'no-store' })
       .then(r => {
         if (!r.ok) throw new Error(`api ${r.status}`);
+        // ETag = 서버 DB 리비전. 이후 저장 시 If-Match 로 되돌려 lost-update 를 막는다.
+        dbRevRef.current = (r.headers.get('ETag') || '').replace(/"/g, '') || null;
         return r.json();
       })
       .then(raw => {
         const migrated = safeMigrate(raw, 'file-db');
+        lastSyncedRef.current = migrated; // 서버 동기화 기준점 — 직후 무변경 저장은 skip
         setData(migrated);
         console.log('[init] file DB에서 로드');
       })
@@ -170,15 +176,67 @@ function App() {
       saveQueue.current = saveQueue.current
         .catch(() => {})
         .then(async () => {
-          const r = await fetch('/api/db', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(snapshot),
-          });
-          if (!r.ok) {
-            let detail = '';
-            try { detail = await r.text(); } catch (e) {}
-            throw new Error(`file DB ${r.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+          // 마지막 동기화본과 동일하면 저장 불필요 — 로드/병합/덮어쓰기 직후 멱등 수렴.
+          if (DataService.stableEqual(snapshot, lastSyncedRef.current)) return;
+
+          // If-Match=base rev 송신. 200→새 rev 반환, 409→conflict 플래그로 throw, 기타→throw.
+          const postDb = async (payload, baseRev) => {
+            const r = await fetch('/api/db', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(baseRev ? { 'If-Match': `"${baseRev}"` } : {}),
+              },
+              body: JSON.stringify(payload),
+            });
+            if (r.status === 409) { const e = new Error('conflict'); e.conflict = true; throw e; }
+            if (!r.ok) {
+              let detail = '';
+              try { detail = await r.text(); } catch (e) {}
+              throw new Error(`file DB ${r.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+            }
+            const body = await r.json().catch(() => ({}));
+            return (body && body.rev) || (r.headers.get('ETag') || '').replace(/"/g, '') || null;
+          };
+
+          try {
+            const rev = await postDb(snapshot, dbRevRef.current);
+            dbRevRef.current = rev;
+            lastSyncedRef.current = snapshot;
+          } catch (err) {
+            if (!err || !err.conflict) throw err; // 비충돌 오류 → 아래 fallback
+
+            // 충돌: 최신본을 받아 base(마지막 동기화본) 대비 3-way 병합 판정.
+            const fresh = await fetch('/api/db', { cache: 'no-store' });
+            const serverRev = (fresh.headers.get('ETag') || '').replace(/"/g, '') || null;
+            let server;
+            try { server = migrateData(await fresh.json()); } catch (e) { server = {}; }
+            const res = DataService.resolveConcurrentEdit(lastSyncedRef.current, snapshot, server);
+
+            if (res.status === 'identical') {
+              // 내 편집이 이미 서버와 동일 — rev 만 동기화.
+              dbRevRef.current = serverRev;
+              lastSyncedRef.current = server;
+            } else if (res.status === 'merged') {
+              // 서로 다른 섹션 편집 → 무손실 자동 병합 후 1회 재저장.
+              try {
+                const rev2 = await postDb(res.data, serverRev);
+                dbRevRef.current = rev2;
+                lastSyncedRef.current = res.data;
+                setData(res.data);
+                notify('다른 창의 변경과 자동 병합되었습니다');
+              } catch (e2) {
+                if (e2 && e2.conflict) {
+                  // 재충돌(그 짧은 사이 또 저장) → 사용자 선택 모달로 강등.
+                  try { localStorage.setItem('inkPlanData.conflict', JSON.stringify(snapshot)); } catch (e) {}
+                  setConflictState({ local: snapshot, server, serverRev, conflictKeys: res.conflictKeys });
+                } else { throw e2; }
+              }
+            } else {
+              // 같은 섹션을 양쪽이 변경 → 진짜 충돌. 패자 후보 백업 + 사용자 선택.
+              try { localStorage.setItem('inkPlanData.conflict', JSON.stringify(snapshot)); } catch (e) {}
+              setConflictState({ local: snapshot, server, serverRev, conflictKeys: res.conflictKeys });
+            }
           }
         })
         .catch(e => {
@@ -270,6 +328,37 @@ function App() {
       });
   };
   const ctx = { data, setData, notify, tweaks, setTweaks, apiKey, saveSettings, geminiModel, ocrResult, setOcrResult, lastMergeInfo, setLastMergeInfo, setView, today: weekInfo.today, dates: weekInfo.dates };
+
+  // 충돌 모달 해소 — 두 선택 모두 패자 후보는 inkPlanData.conflict 에 백업되어 silent loss=0.
+  const resolveConflictUseServer = () => {
+    const c = conflictState; if (!c) return;
+    dbRevRef.current = c.serverRev;
+    lastSyncedRef.current = c.server; // 직후 저장 effect 는 stableEqual 로 skip
+    setData(c.server);
+    setConflictState(null);
+    notify('서버 최신본을 적용했습니다 (이전 편집은 임시 보관됨)');
+  };
+  const resolveConflictUseLocal = async () => {
+    const c = conflictState; if (!c) return;
+    try { localStorage.setItem('inkPlanData.conflict', JSON.stringify(c.server)); } catch (e) {}
+    try {
+      const r = await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(c.serverRev ? { 'If-Match': `"${c.serverRev}"` } : {}) },
+        body: JSON.stringify(c.local),
+      });
+      if (!r.ok) throw new Error(`file DB ${r.status}`);
+      const body = await r.json().catch(() => ({}));
+      dbRevRef.current = (body && body.rev) || (r.headers.get('ETag') || '').replace(/"/g, '') || null;
+      lastSyncedRef.current = c.local;
+      setData(c.local);
+      setConflictState(null);
+      notify('내 변경으로 덮어썼습니다 (서버 쪽 변경은 임시 보관됨)');
+    } catch (e) {
+      setConflictState(null);
+      notify('덮어쓰기 실패 — 잠시 후 다시 시도하세요');
+    }
+  };
 
   // 헤더 bell = 통합 알림 센터(마스터 결함 + 재고 부족). 심각도 우선: 마스터 error는 빨강·data-quality.
   const bellShow = masterHealth.show || inkShortage.show;
@@ -386,6 +475,14 @@ function App() {
         />
       )}
 
+      {conflictState && (
+        <ConflictModal
+          conflictKeys={conflictState.conflictKeys}
+          onUseServer={resolveConflictUseServer}
+          onUseLocal={resolveConflictUseLocal}
+        />
+      )}
+
       <Toast message={toast} />
     </div>
   );
@@ -400,6 +497,52 @@ const GEMINI_MODELS = [
   { value: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash',      meta: 'RPM 5 · RPD 20 · 정확도 검증됨' },
   { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', meta: 'RPM 10 · RPD 20 · 빠름' },
 ];
+
+// 충돌 모달용 top-level 섹션 라벨 — 사용자에게 충돌 위치를 한국어로 보여준다.
+const SECTION_LABELS = {
+  products: '제품 마스터',
+  inkPlan: '잉크 생산계획',
+  inkAdd: '넣어줄 잉크',
+  injection: '사출계획',
+  testInks: '양산대응',
+  machineAssignments: '호기 배정',
+};
+
+function ConflictModal({ conflictKeys, onUseServer, onUseLocal }) {
+  const labels = (conflictKeys && conflictKeys.length)
+    ? conflictKeys.map(k => SECTION_LABELS[k] || k)
+    : ['여러 항목'];
+  return (
+    <Modal
+      title="동시 편집 충돌"
+      onClose={onUseServer}
+      footer={
+        <>
+          <button className="btn" onClick={onUseServer}>
+            <Icon name="history" size={12} /> 다시 불러오기(서버 적용)
+          </button>
+          <button className="btn btn--danger" onClick={onUseLocal}>
+            <Icon name="check" size={12} /> 내 변경으로 덮어쓰기
+          </button>
+        </>
+      }
+    >
+      <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--ink-700)' }}>
+        다른 창(또는 다른 PC)에서 같은 항목을 먼저 저장해 <strong>충돌</strong>이 발생했습니다.
+        <div style={{ margin: '10px 0', padding: 10, background: 'var(--warn-50, #fff7ed)', borderRadius: 8 }}>
+          충돌 항목: <strong>{labels.join(', ')}</strong>
+        </div>
+        <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: 'var(--ink-600)' }}>
+          <li><strong>다시 불러오기</strong> — 서버 최신본을 적용. 내 편집은 임시 보관(복구 가능).</li>
+          <li><strong>내 변경으로 덮어쓰기</strong> — 내 편집을 저장. 서버 쪽 변경은 임시 보관.</li>
+        </ul>
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink-500)' }}>
+          어느 쪽이든 덮인 데이터는 브라우저 임시 저장소(<code>inkPlanData.conflict</code>)에 백업됩니다.
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function SettingsModal({ apiKey, model, setData, notify, onSave, onClose }) {
   const [key, setKey] = useState(apiKey);
