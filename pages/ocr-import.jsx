@@ -173,17 +173,34 @@ async function callGemini(apiKey, model, file, groundingText) {
     },
   };
 
-  const res = await fetch(`${GEMINI_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // 타임아웃 가드 — 무료 등급 혼잡/네트워크 스톨 시 무한 대기 방지 (90초)
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(() => ctrl.abort(), 90000);
+  let res;
+  try {
+    res = await fetch(`${GEMINI_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`응답 지연(90초 초과) — Gemini 무료 등급이 혼잡한 시간대일 수 있어요. 잠시 후 재시도하거나, 설정에서 다른 모델로 바꿔보세요. (현재: ${model})`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     let detail = '';
     try { const j = await res.json(); detail = j.error?.message || JSON.stringify(j); } catch (e) { detail = await res.text(); }
     if (res.status === 429) {
       throw new Error(`한도 초과 (${model}): RPM 또는 RPD 한도에 걸렸어. 설정에서 더 큰 한도 모델(예: gemini-3.1-flash-lite)로 바꾸거나 잠시 후 재시도.\n\n원문: ${detail}`);
+    }
+    if (res.status === 503) {
+      throw new Error(`모델 과부하 (${model}): Gemini 쪽이 혼잡합니다. 1~2분 후 재시도하거나 설정에서 다른 모델로 바꿔보세요.`);
     }
     throw new Error(`Gemini ${res.status}: ${detail}`);
   }
