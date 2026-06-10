@@ -1224,6 +1224,108 @@
     return { nextData: newData, mergedByShift, skippedNoMachine, skippedNoMatch, mergedDays };
   }
 
+  // ── OCR 결과 검증·grounding (검수 페이지·ocr-import 에서 사용) ─────────────────
+
+  // OCR 파싱 결과를 마스터·사출계획과 대조해 구조적 이상을 찾는다 (결정적 검증).
+  // 반환: [{ level:'error'|'warn', type, message }] — 검수 페이지 경고 패널용.
+  function lintOcrResult(parsed, data) {
+    if (!parsed) return [{ level: 'error', type: 'no-parsed', message: 'OCR 결과가 비어 있습니다' }];
+    const issues = [];
+
+    // 1) 날짜 정합: request_date 필수, next_date 는 보통 요청일+1
+    const req = parseDateLocal(parsed.request_date);
+    if (!req) {
+      issues.push({ level: 'error', type: 'bad-request-date', message: `요청일을 해석할 수 없음: "${parsed.request_date || ''}"` });
+    }
+    const next = parseDateLocal(parsed.next_date);
+    if (!next) {
+      issues.push({ level: 'warn', type: 'bad-next-date', message: '명일 날짜 누락/해석 불가 — 요청일+1로 추론됨' });
+    } else if (req) {
+      const expected = new Date(req);
+      expected.setDate(expected.getDate() + 1);
+      if (localDateISO(expected) !== localDateISO(next)) {
+        issues.push({ level: 'warn', type: 'next-date-gap', message: `명일(${parsed.next_date})이 요청일+1(${localDateISO(expected)})과 다름 — 헤더 날짜 오독 가능성` });
+      }
+    }
+
+    // 2) 알려진 호기 집합 (사출계획 기준)
+    const knownMachines = new Set();
+    for (const floor of Object.keys(data?.injection || {})) {
+      for (const m of data.injection[floor] || []) {
+        const no = machineNoOf(m);
+        if (no != null) knownMachines.add(no);
+      }
+    }
+
+    // 3) 시프트별: 미지 호기 / 같은 시프트 내 중복 / 시프트 간 호기 집합 불일치
+    const shiftSets = new Map();
+    for (const sh of parsed.shifts || []) {
+      const seen = new Map();
+      for (const r of sh.rows || []) {
+        seen.set(r.machine_no, (seen.get(r.machine_no) || 0) + 1);
+        if (knownMachines.size && !knownMachines.has(Number(r.machine_no))) {
+          issues.push({ level: 'warn', type: 'unknown-machine', message: `${sh.shift} ${r.machine_no}호기: 사출계획에 없는 호기 — 번호 오독 가능성` });
+        }
+      }
+      for (const [no, cnt] of seen) {
+        if (cnt > 1) issues.push({ level: 'warn', type: 'dup-machine', message: `${sh.shift} ${no}호기: 같은 시프트에 ${cnt}회 중복 추출` });
+      }
+      shiftSets.set(sh.shift, new Set(seen.keys()));
+    }
+    const allNos = new Set();
+    for (const s of shiftSets.values()) for (const no of s) allNos.add(no);
+    for (const [shift, s] of shiftSets) {
+      const missing = [...allNos].filter(no => !s.has(no)).sort((a, b) => a - b);
+      if (missing.length) {
+        issues.push({ level: 'warn', type: 'shift-set-mismatch', message: `${shift}에 누락된 호기: ${missing.join(', ')} — 시프트 분리 오류 가능성` });
+      }
+    }
+
+    // 4) 미지 브랜드 (마스터 brand 어휘 기준 — TEST·빈값 제외, 대소문자 무시)
+    const knownBrands = new Set(buildBrandOptions(data?.products).map(b => b.toLowerCase()));
+    const unknownBrands = new Map();
+    for (const sh of parsed.shifts || []) {
+      for (const r of sh.rows || []) {
+        const b = String(r.brand || '').trim();
+        if (!b || b.toUpperCase() === 'TEST') continue;
+        if (knownBrands.size && !knownBrands.has(b.toLowerCase())) {
+          if (!unknownBrands.has(b)) unknownBrands.set(b, []);
+          unknownBrands.get(b).push(`${sh.shift} ${r.machine_no}호기`);
+        }
+      }
+    }
+    for (const [b, locs] of unknownBrands) {
+      const tail = locs.length > 4 ? ` 외 ${locs.length - 4}곳` : '';
+      issues.push({ level: 'warn', type: 'unknown-brand', message: `미지 브랜드 "${b}" (${locs.slice(0, 4).join(', ')}${tail}) — 마스터에 없는 표기, 오인식 또는 신규` });
+    }
+
+    return issues;
+  }
+
+  // OCR 프롬프트에 주입할 작업장 어휘(grounding) — 브랜드·호기·호기별 최근 배정 제품.
+  // 같은 호기는 제품이 반복되는 도메인 특성으로 철자 수렴을 돕는다 (순수 함수).
+  function buildOcrGroundingHints(data) {
+    const brands = buildBrandOptions(data?.products);
+    const machines = [];
+    for (const floor of Object.keys(data?.injection || {})) {
+      for (const m of data.injection[floor] || []) {
+        const no = machineNoOf(m);
+        if (no == null) continue;
+        const products = new Set();
+        for (const day of Object.keys(m.schedule || {})) {
+          const cell = m.schedule[day] || {};
+          for (const k of ['day', 'night']) {
+            const v = String(cell[k] || '').trim();
+            if (v) products.add(v);
+          }
+        }
+        machines.push({ no, floor, products: [...products] });
+      }
+    }
+    machines.sort((a, b) => a.no - b.no);
+    return { brands, machines };
+  }
+
   // ── inventory LOT 유효기간 (pages/inventory.jsx 에서 이전) ───────────────────
 
   // LOT 잔여 유효기간(4일) 계산 — 셀 텍스트·tone·툴팁
@@ -1373,6 +1475,8 @@
     mapOcrRowsInGroup,
     changeMachineInGroup,
     applyOcrToInjection,
+    lintOcrResult,
+    buildOcrGroundingHints,
     // inventory
     inkLifeInfo,
     // 도메인 상수 (요일/교대) — 단일 출처

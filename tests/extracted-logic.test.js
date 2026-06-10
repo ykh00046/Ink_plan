@@ -451,6 +451,114 @@ test('applyOcrToInjection: request_date 파싱 불가면 {error:no-request-day}'
   assert.deepEqual(res, { error: 'no-request-day' });
 });
 
+// ── review/OCR: lintOcrResult (결정적 검증 레이어) ───────────────────────────
+const LINT_DATA = {
+  products: [{ name: 'P1', brand: 'IRIS' }, { name: 'P2', brand: 'BELLA' }],
+  injection: {
+    '3층': [
+      { machineNo: 1, schedule: { 월: { day: 'P1', night: '' } } },
+      { machineNo: 2, schedule: {} },
+    ],
+  },
+};
+
+test('lintOcrResult: 정상 결과는 이슈 0', () => {
+  const parsed = {
+    request_date: '2026-06-03',
+    next_date: '2026-06-04',
+    shifts: [
+      { shift: '주간', rows: [{ machine_no: 1, brand: 'IRIS', product_name: 'P1' }] },
+      { shift: '야간', rows: [{ machine_no: 1, brand: 'TEST', product_name: 'TEST' }] },
+      { shift: '명일주간', rows: [{ machine_no: 1, brand: '', product_name: 'P2' }] },
+    ],
+  };
+  assert.deepEqual(DataService.lintOcrResult(parsed, LINT_DATA), []);
+});
+
+test('lintOcrResult: 요청일 해석 불가 → error, 명일≠요청일+1 → warn', () => {
+  const bad = DataService.lintOcrResult({ request_date: 'INVALID', shifts: [] }, LINT_DATA);
+  assert.ok(bad.some(i => i.level === 'error' && i.type === 'bad-request-date'));
+  assert.ok(bad.some(i => i.level === 'warn' && i.type === 'bad-next-date'));
+  const gap = DataService.lintOcrResult(
+    { request_date: '2026-06-03', next_date: '2026-06-10', shifts: [] }, LINT_DATA);
+  assert.ok(gap.some(i => i.type === 'next-date-gap'));
+});
+
+test('lintOcrResult: 미지 호기·시프트 내 중복·시프트 집합 불일치 탐지', () => {
+  const parsed = {
+    request_date: '2026-06-03',
+    next_date: '2026-06-04',
+    shifts: [
+      { shift: '주간', rows: [
+        { machine_no: 1, brand: 'IRIS', product_name: 'P1' },
+        { machine_no: 1, brand: 'IRIS', product_name: 'P1' },   // 중복
+        { machine_no: 99, brand: 'IRIS', product_name: 'P1' },  // 미지 호기
+      ] },
+      { shift: '야간', rows: [{ machine_no: 1, brand: 'IRIS', product_name: 'P1' }] }, // 99 누락
+      { shift: '명일주간', rows: [] },
+    ],
+  };
+  const issues = DataService.lintOcrResult(parsed, LINT_DATA);
+  assert.ok(issues.some(i => i.type === 'unknown-machine' && i.message.includes('99')));
+  assert.ok(issues.some(i => i.type === 'dup-machine' && i.message.includes('주간')));
+  assert.ok(issues.some(i => i.type === 'shift-set-mismatch' && i.message.includes('야간')));
+});
+
+test('lintOcrResult: 마스터에 없는 브랜드 → warn (TEST·빈값은 제외)', () => {
+  const parsed = {
+    request_date: '2026-06-03',
+    next_date: '2026-06-04',
+    shifts: [
+      { shift: '주간', rows: [
+        { machine_no: 1, brand: 'IRIS', product_name: 'P1' },   // 알려진 브랜드
+        { machine_no: 2, brand: 'IRSI', product_name: 'P1' },   // 오타(미지)
+      ] },
+      { shift: '야간', rows: [
+        { machine_no: 1, brand: 'TEST', product_name: 'TEST' }, // 제외
+        { machine_no: 2, brand: '', product_name: 'P2' },        // 제외
+      ] },
+      { shift: '명일주간', rows: [
+        { machine_no: 1, brand: 'iris', product_name: 'P1' },   // 대소문자 무시 → 알려짐
+        { machine_no: 2, brand: 'IRIS', product_name: 'P1' },
+      ] },
+    ],
+  };
+  const issues = DataService.lintOcrResult(parsed, LINT_DATA);
+  const brandIssues = issues.filter(i => i.type === 'unknown-brand');
+  assert.equal(brandIssues.length, 1);
+  assert.ok(brandIssues[0].message.includes('IRSI'));
+});
+
+test('lintOcrResult: parsed 없으면 error 1건', () => {
+  const issues = DataService.lintOcrResult(null, LINT_DATA);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].level, 'error');
+});
+
+// ── ocr-import: buildOcrGroundingHints (프롬프트 grounding 어휘) ──────────────
+test('buildOcrGroundingHints: 브랜드 + 호기별 최근 제품(중복 제거·정렬)', () => {
+  const data = {
+    products: [{ name: 'P1', brand: '병' }, { name: 'P2', brand: '갑' }],
+    injection: {
+      '3층': [
+        { machineNo: 2, schedule: { 월: { day: 'A', night: 'B' }, 화: { day: 'A', night: '' } } },
+        { machineNo: 1, schedule: { 월: { day: '', night: '' } } },
+      ],
+    },
+  };
+  const hints = DataService.buildOcrGroundingHints(data);
+  assert.deepEqual(hints.brands, ['갑', '병']);          // buildBrandOptions 위임
+  assert.equal(hints.machines.length, 2);
+  assert.equal(hints.machines[0].no, 1);                  // 호기번호 정렬
+  assert.deepEqual(hints.machines[0].products, []);       // 빈 스케줄
+  assert.deepEqual(hints.machines[1].products, ['A', 'B']); // unique·빈값 제외
+});
+
+test('buildOcrGroundingHints: null/빈 data 안전', () => {
+  assert.deepEqual(DataService.buildOcrGroundingHints(null), { brands: [], machines: [] });
+  assert.deepEqual(DataService.buildOcrGroundingHints({}), { brands: [], machines: [] });
+});
+
 test('applyOcrToInjection: floor 미지정이면 전체 층에서 호기 탐색', () => {
   const data = makeInjData();
   const ocr = {

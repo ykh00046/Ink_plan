@@ -103,6 +103,46 @@ function ReviewHeader({ ocrResult, shiftRowCount, stats, onApply, onClear }) {
   );
 }
 
+// ── sub-component: OCR 결정적 검증 경고 패널 ─────────────────────────────────
+// lintOcrResult 결과(날짜·호기·시프트 집합·브랜드 이상)를 반영 전에 보여준다.
+
+function OcrLintPanel({ issues }) {
+  const [open, setOpen] = useState(true);
+  const errors = issues.filter(i => i.level === 'error');
+  const warns = issues.filter(i => i.level === 'warn');
+  return (
+    <div style={{
+      margin: '0 0 12px',
+      border: `1px solid ${errors.length ? 'var(--bad-300, oklch(0.8 0.1 25))' : 'oklch(0.85 0.08 80)'}`,
+      borderRadius: 8,
+      background: errors.length ? 'oklch(0.97 0.02 25)' : 'oklch(0.98 0.02 85)',
+      fontSize: 12,
+    }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', fontWeight: 600 }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <Icon name="bell" size={13} />
+        OCR 검증: {errors.length > 0 && <span style={{ color: 'var(--bad-600)' }}>오류 {errors.length}</span>}
+        {errors.length > 0 && warns.length > 0 && ' · '}
+        {warns.length > 0 && <span style={{ color: 'oklch(0.55 0.12 80)' }}>주의 {warns.length}</span>}
+        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--ink-500)' }}>
+          이미지와 대조해 확인하세요 {open ? '▾' : '▸'}
+        </span>
+      </div>
+      {open && (
+        <ul style={{ margin: 0, padding: '0 12px 10px 30px', display: 'grid', gap: 3 }}>
+          {issues.map((it, i) => (
+            <li key={i} style={{ color: it.level === 'error' ? 'var(--bad-600)' : 'var(--ink-700)' }}>
+              {it.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ── sub-component: 그룹 표 (필터 + 행들) ─────────────────────────────────────
 
 function ReviewTable({
@@ -308,6 +348,12 @@ function ReviewPage({ ctx }) {
     return out;
   }, [ocrResult]);
 
+  // 결정적 OCR 검증 — 날짜·호기·시프트 집합·브랜드를 마스터/사출계획과 대조
+  const ocrLint = useMemo(
+    () => (ocrResult?.parsed ? DataService.lintOcrResult(ocrResult.parsed, data) : []),
+    [ocrResult, data],
+  );
+
   const addMasterProduct = ({ factory, name, type, brand, inks }) => {
     const cleanInks = padInks3(inks);
     const newProduct = {
@@ -448,6 +494,8 @@ function ReviewPage({ ctx }) {
         onApply={handleApplyToInjection}
         onClear={() => setOcrResult(null)}
       />
+
+      {ocrLint.length > 0 && <OcrLintPanel issues={ocrLint} />}
 
       <div className="page__body">
         <ReviewTable

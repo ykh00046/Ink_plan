@@ -132,20 +132,38 @@ async function compressImage(file, maxDim = 1600, quality = 0.85) {
   };
 }
 
-async function callGemini(apiKey, model, file) {
+// 작업장 어휘 grounding 텍스트 — 마스터·사출계획에서 파생(DataService 순수 함수).
+// 같은 호기는 제품이 반복되는 도메인 특성을 이용해 브랜드/제품명 철자 수렴을 돕는다.
+function buildGroundingText(data) {
+  const { brands, machines } = DataService.buildOcrGroundingHints(data || {});
+  if (!brands.length && !machines.length) return '';
+  const lines = ['## 작업장 참고 어휘 (철자 수렴용 — 이미지 내용이 항상 우선)'];
+  if (brands.length) lines.push(`알려진 브랜드: ${brands.join(', ')}`);
+  if (machines.length) {
+    lines.push('알려진 호기와 최근 배정 제품(같은 호기는 제품이 반복되는 경우가 많음):');
+    for (const m of machines) {
+      if (m.products.length) lines.push(`- ${m.floor} ${m.no}호기: ${m.products.join(' | ')}`);
+    }
+    lines.push(`전체 호기 번호: ${machines.map(m => m.no).join(', ')}`);
+  }
+  lines.push('주의: 위 목록은 글자가 흐릿할 때 표기를 수렴시키는 참고용일 뿐이다. 이미지에 보이는 값이 목록과 명백히 다르면 이미지를 그대로 따르고, 목록에 없는 새 브랜드·제품도 보이는 그대로 추출하라.');
+  return lines.join('\n');
+}
+
+async function callGemini(apiKey, model, file, groundingText) {
   // 1) 이미지 압축 (1600px / JPEG 0.85)
   const t0 = performance.now();
   const compressed = await compressImage(file, 1600, 0.85);
   const compressMs = Math.round(performance.now() - t0);
 
+  const parts = [
+    { text: OCR_SYSTEM_PROMPT },
+    ...(groundingText ? [{ text: groundingText }] : []),
+    { inline_data: { mime_type: compressed.mime, data: compressed.base64 } },
+    { text: '이 이미지를 파싱하여 구조화된 JSON으로 반환하세요.' },
+  ];
   const body = {
-    contents: [{
-      parts: [
-        { text: OCR_SYSTEM_PROMPT },
-        { inline_data: { mime_type: compressed.mime, data: compressed.base64 } },
-        { text: '이 이미지를 파싱하여 구조화된 JSON으로 반환하세요.' },
-      ],
-    }],
+    contents: [{ parts }],
     generationConfig: {
       response_mime_type: 'application/json',
       response_schema: OCR_RESPONSE_SCHEMA,
@@ -187,7 +205,7 @@ async function callGemini(apiKey, model, file) {
 }
 
 function OcrImportPage({ ctx }) {
-  const { apiKey, geminiModel, notify, setOcrResult, setView } = ctx;
+  const { apiKey, geminiModel, notify, setOcrResult, setView, data } = ctx;
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [status, setStatus] = useState('idle'); // idle | uploading | parsing | done | error
@@ -258,7 +276,7 @@ function OcrImportPage({ ctx }) {
     const t0 = performance.now();
     const tick = setInterval(() => setElapsed(Math.round((performance.now() - t0) / 100) / 10), 100);
     try {
-      const { parsed, usage: u, image, compressMs } = await callGemini(apiKey, geminiModel, file);
+      const { parsed, usage: u, image, compressMs } = await callGemini(apiKey, geminiModel, file, buildGroundingText(data));
       const totalMs = Math.round(performance.now() - t0);
       setResult(parsed);
       setUsage({ ...u, ms: totalMs, compressMs, image, model: geminiModel });
