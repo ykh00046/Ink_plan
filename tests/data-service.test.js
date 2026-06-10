@@ -250,6 +250,22 @@ test('lintMasters: 사출계획에 있으나 제품 마스터에 없으면 produ
   assert.match(missing[0].detail, /3층.*10호기.*월.*야/);
 });
 
+test('lintMasters: 사출계획 TEST 런 셀은 정합성 점검 제외 (제품 아님)', () => {
+  const data = {
+    products: [{ name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [
+        // TEST 변형 표기 포함 — 검수 isTest 판정과 동일 기준으로 전부 제외
+        { machine: '10호기', schedule: { 월: { day: 'TEST', night: '(TEST)' }, 화: { day: '테스트', night: 'test' } } },
+      ],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  const missing = r.issues.filter(i => i.category === 'product-not-in-master');
+  assert.equal(missing.length, 0);
+});
+
 test('lintMasters: 정규화 함수 주입 시 표기 차이는 무시', () => {
   const data = {
     products: [{ name: 'BELLA D_Cedar', inks: ['INK1'] }],

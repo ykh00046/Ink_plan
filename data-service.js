@@ -269,6 +269,9 @@
           for (const shift of Object.keys(cell)) {
             const value = cell[shift];
             if (!value) continue;
+            // TEST 런 셀은 제품이 아님 — 정합성 점검 제외 (검수 isTest 판정과 동일 기준)
+            const normTest = normalizeProductName(value);
+            if (normTest === 'TEST' || normTest === '테스트') continue;
             if (productInks.has(value)) continue;
             const n = norm(value);
             if (n && normProductName.has(n)) continue;
