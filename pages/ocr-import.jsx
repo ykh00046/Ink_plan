@@ -222,7 +222,7 @@ async function callGemini(apiKey, model, file, groundingText) {
 }
 
 function OcrImportPage({ ctx }) {
-  const { apiKey, geminiModel, notify, setOcrResult, setView, data } = ctx;
+  const { apiKey, geminiModel, notify, setOcrResult, setView, data, saveSettings } = ctx;
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [status, setStatus] = useState('idle'); // idle | uploading | parsing | done | error
@@ -340,7 +340,25 @@ function OcrImportPage({ ctx }) {
               <span className={`page__meta-chip ${apiKey ? 'page__meta-chip--today' : 'page__meta-chip--warn'}`}>
                 {apiKey ? '✓ API 연결됨' : '⚠ API 키 필요'}
               </span>
-              <span className="page__meta-chip">{geminiModel || 'gemini-3.1-flash-lite'}</span>
+              {/* 설정 모달까지 안 가고 바로 모델 변경 — 변경 즉시 저장(설정과 동일 저장 경로) */}
+              <select
+                value={geminiModel || 'gemini-3.1-flash-lite'}
+                onChange={e => {
+                  saveSettings(apiKey || '', e.target.value);
+                  notify(`모델 변경: ${e.target.value}`);
+                }}
+                title={(window.GEMINI_MODELS || []).find(g => g.value === geminiModel)?.meta || '파싱에 사용할 Gemini 모델'}
+                style={{
+                  font: 'inherit', fontSize: 11, fontWeight: 500,
+                  padding: '2px 6px', borderRadius: 999,
+                  border: '1px solid var(--ink-200)', background: 'var(--ink-50)',
+                  color: 'var(--ink-700)', cursor: 'pointer', maxWidth: 230,
+                }}
+              >
+                {(window.GEMINI_MODELS || [{ value: geminiModel, label: geminiModel, meta: '' }]).map(g => (
+                  <option key={g.value} value={g.value}>{g.label} — {g.meta}</option>
+                ))}
+              </select>
               <span className="page__meta-chip">현장 스캔 → Gemini Vision → 검수</span>
             </div>
           </div>

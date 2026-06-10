@@ -497,6 +497,8 @@ const GEMINI_MODELS = [
   { value: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash',      meta: 'RPM 5 · RPD 20 · 정확도 검증됨' },
   { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', meta: 'RPM 10 · RPD 20 · 빠름' },
 ];
+// OCR 입력 페이지의 인라인 모델 선택에서도 사용 (설정 모달과 단일 출처)
+window.GEMINI_MODELS = GEMINI_MODELS;
 
 // 충돌 모달용 top-level 섹션 라벨 — 사용자에게 충돌 위치를 한국어로 보여준다.
 const SECTION_LABELS = {
