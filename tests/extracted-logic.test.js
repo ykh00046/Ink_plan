@@ -273,6 +273,22 @@ test('matchOcrRow: 빈 이름 또는 TEST → skip', () => {
   assert.equal(DataService.matchOcrRow({ product_name: 'TEST' }, MASTER).status, 'skip');
 });
 
+test('matchOcrRow: TEST 변형 표기·구분란 TEST도 isTest (미등록 목록 제외)', () => {
+  // 표기 변형: 괄호/구분자/소문자/한글
+  for (const name of ['(TEST)', 'T.E.S.T', 'test', '테스트']) {
+    const r = DataService.matchOcrRow({ product_name: name }, MASTER);
+    assert.equal(r.isTest, true, `${name} → isTest여야 함`);
+    assert.equal(r.status, 'skip');
+  }
+  // 구분(brand)란이 TEST면 제품명이 실명이어도 테스트 행
+  const byBrand = DataService.matchOcrRow({ product_name: '신제품X', brand: 'TEST' }, MASTER);
+  assert.equal(byBrand.isTest, true);
+  assert.equal(byBrand.status, 'skip');
+  // 반례: TEST가 부분 문자열인 실제품명은 그대로 매칭 흐름 (skip 아님)
+  const tester = DataService.matchOcrRow({ product_name: 'TESTER BROWN', brand: '갑' }, MASTER);
+  assert.equal(tester.isTest, false);
+});
+
 // ── review/OCR: buildReviewRows / buildProductGroups ─────────────────────────
 const OCR_RESULT = {
   parsed: {

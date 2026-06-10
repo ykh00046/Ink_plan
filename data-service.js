@@ -1036,7 +1036,16 @@
 
   // OCR 한 행을 마스터와 매칭 — { status, matchedName?, candidates?, suggestedBrand? }
   function matchOcrRow(r, masterIndex) {
-    const isTest = !r.product_name || /^TEST$/i.test(r.product_name.trim());
+    // TEST 행 판정 — 미등록 목록에서 제외(등록 불필요, 단 사출계획에는 그대로 반영):
+    //  · 제품명 비어있음
+    //  · 제품명이 TEST/테스트 (구분자·공백·괄호 변형 포함: "(TEST)", "T.E.S.T" 등 정규화 후 비교)
+    //  · 구분(brand)란이 TEST — 테스트 런은 제품명이 있어도 구분란에 TEST로 표기됨
+    const nameNorm = normalizeProductName(r.product_name);
+    const brandNorm = normalizeProductName(r.brand);
+    const isTest = !String(r.product_name || '').trim()
+      || nameNorm === 'TEST'
+      || nameNorm === '테스트'
+      || brandNorm === 'TEST';
     if (isTest) {
       return { isTest: true, status: 'skip', matchedName: null, confidence: 0, candidates: [] };
     }
@@ -1287,7 +1296,7 @@
     for (const sh of parsed.shifts || []) {
       for (const r of sh.rows || []) {
         const b = String(r.brand || '').trim();
-        if (!b || b.toUpperCase() === 'TEST') continue;
+        if (!b || normalizeProductName(b) === 'TEST') continue; // TEST 변형 표기 포함 제외
         if (knownBrands.size && !knownBrands.has(b.toLowerCase())) {
           if (!unknownBrands.has(b)) unknownBrands.set(b, []);
           unknownBrands.get(b).push(`${sh.shift} ${r.machine_no}호기`);
