@@ -1236,6 +1236,32 @@
     return { nextData: newData, mergedByShift, skippedNoMachine, skippedNoMatch, mergedDays };
   }
 
+  // 오늘 사출 라인업 — 오늘 요일에 주/야간 제품이 잡힌 호기만 추림 (대시보드 read-only 패널)
+  function buildTodayLineup(injection, todayKor) {
+    const rows = [];
+    if (!todayKor) return rows;
+    for (const floor of Object.keys(injection || {})) {
+      for (const m of injection[floor] || []) {
+        const cell = (m.schedule || {})[todayKor] || {};
+        const day = String(cell.day || '').trim();
+        const night = String(cell.night || '').trim();
+        if (!day && !night) continue;
+        const no = machineNoOf(m);
+        rows.push({
+          floor,
+          machineNo: no,
+          machine: String(m.machine || (no != null ? `${no}호기` : '')),
+          day,
+          night,
+        });
+      }
+    }
+    rows.sort((a, b) => a.floor === b.floor
+      ? (a.machineNo ?? 999) - (b.machineNo ?? 999)
+      : (a.floor < b.floor ? -1 : 1));
+    return rows;
+  }
+
   // ── OCR 결과 검증·grounding (검수 페이지·ocr-import 에서 사용) ─────────────────
 
   // OCR 파싱 결과를 마스터·사출계획과 대조해 구조적 이상을 찾는다 (결정적 검증).
@@ -1489,6 +1515,7 @@
     applyOcrToInjection,
     lintOcrResult,
     buildOcrGroundingHints,
+    buildTodayLineup,
     // inventory
     inkLifeInfo,
     // 도메인 상수 (요일/교대) — 단일 출처

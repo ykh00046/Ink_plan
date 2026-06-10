@@ -33,6 +33,12 @@ function DashboardPage({ ctx }) {
     ? `오늘 ${week.today}요일${week.todayDate ? ` (${week.todayDate})` : ''}`
     : '이번 주';
 
+  // 오늘 사출 라인업 — 카드 아래 빈 공간을 실제 작업 정보로 채움 (read-only)
+  const lineup = React.useMemo(
+    () => DataService.buildTodayLineup(data?.injection, today),
+    [data, today]
+  );
+
   return (
     <div className="page dash">
       <h1 className="page__title">대시보드</h1>
@@ -67,6 +73,73 @@ function DashboardPage({ ctx }) {
           sub="제품·잉크·약품 마스터 관리"
           go="products"
         />
+      </div>
+
+      {/* 하단 상세: 오늘 라인업(좌) + 부족 상세/빠른 작업(우) — 카드 요약과 동일 출처, read-only */}
+      <div className="dash-detail">
+        <div className="card">
+          <div className="card__head">
+            <span className="title">오늘 사출 라인업{week.today ? ` — ${week.today}요일` : ''}</span>
+            <button className="btn btn--sm" onClick={() => setView('injection')}>사출계획 열기</button>
+          </div>
+          <div className="card__body card__body--flush">
+            {lineup.length === 0 ? (
+              <div className="empty-state" style={{ padding: 24 }}>
+                <div className="empty-state__title">오늘 잡힌 사출 일정이 없습니다</div>
+                <div className="empty-state__hint">INK 요청서를 파싱하면 여기에 오늘 라인업이 표시됩니다.</div>
+              </div>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 60 }}>층</th>
+                    <th style={{ width: 70 }}>호기</th>
+                    <th>주간</th>
+                    <th>야간</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineup.map(r => (
+                    <tr key={`${r.floor}-${r.machine}`} style={{ cursor: 'pointer' }} onClick={() => setView('injection')}>
+                      <td><span className="tag">{r.floor}</span></td>
+                      <td style={{ fontWeight: 600 }}>{r.machine}</td>
+                      <td>{r.day || <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
+                      <td>{r.night || <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card__head">
+            <span className="title">{shortage.count > 0 ? '재고 부족 상세' : '빠른 작업'}</span>
+          </div>
+          <div className="card__body">
+            {shortage.count > 0 ? (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {shortage.items.slice(0, 8).map(it => (
+                  <button key={it.ink} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
+                    <span style={{ fontWeight: 600 }}>{it.ink}</span>
+                    <span style={{ color: 'var(--bad-600)', fontWeight: 600 }}>부족 {Math.abs(it.weeklyNeed).toLocaleString()}</span>
+                  </button>
+                ))}
+                {shortage.items.length > 8 && (
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)', textAlign: 'center' }}>외 {shortage.items.length - 8}건 — 잉크 생산계획에서 확인</div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <button className="btn" onClick={() => setView('inventory')}><Icon name="search" size={12} /> 재고 조사 입력</button>
+                <button className="btn" onClick={() => setView('ocr-import')}><Icon name="image" size={12} /> INK 요청서 파싱</button>
+                <button className="btn" onClick={() => setView('ink-plan')}><Icon name="ink" size={12} /> 잉크 생산계획</button>
+                <button className="btn" onClick={() => setView('chemicals')}><Icon name="beaker" size={12} /> 약품요청서 집계</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

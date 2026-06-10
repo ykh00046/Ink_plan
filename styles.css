@@ -898,12 +898,7 @@ button { background: none; border: none; cursor: pointer; }
 .kpi--bad .kpi__accent { background: var(--bad-500); }
 .kpi--ok .kpi__accent { background: var(--ok-500); }
 
-.dash-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-}
-.dash-grid .full { grid-column: 1 / -1; }
+/* (구버전 .dash-grid 2fr/1fr 정의 제거 — 후방 1849행 정의와 이중이었음) */
 
 /* Bars */
 .bar {
@@ -1850,6 +1845,17 @@ button { background: none; border: none; cursor: pointer; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
+}
+/* 카드 아래 상세 패널: 라인업(좌, 넓게) + 부족 상세/빠른 작업(우) */
+.dash-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .dash-detail { grid-template-columns: 1fr; }
 }
 .dash-card {
   display: flex;

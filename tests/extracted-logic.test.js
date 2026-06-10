@@ -366,6 +366,29 @@ test('normalize 헬퍼: 단일화된 동작 검증', () => {
   assert.equal(DataService.inkOfAssignment({ product: '파랑' }), '파랑');
 });
 
+// ── dashboard: buildTodayLineup ──────────────────────────────────────────────
+test('buildTodayLineup: 오늘 요일에 값 있는 호기만, 층→호기번호 정렬', () => {
+  const injection = {
+    '3층': [
+      { machineNo: 14, schedule: { 수: { day: 'P1', night: '' } } },
+      { machineNo: 2, schedule: { 수: { day: '', night: 'P2' } } },
+      { machineNo: 5, schedule: { 수: { day: '', night: '' }, 목: { day: 'X' } } }, // 오늘 빈 호기 제외
+    ],
+    '1층': [{ machineNo: 50, schedule: { 수: { day: 'P3', night: 'P3' } } }],
+  };
+  const rows = DataService.buildTodayLineup(injection, '수');
+  assert.deepEqual(rows.map(r => `${r.floor}/${r.machineNo}`), ['1층/50', '3층/2', '3층/14']);
+  assert.equal(rows[2].day, 'P1');
+  assert.equal(rows[1].night, 'P2');
+  assert.equal(rows[2].machine, '14호기'); // machine 라벨 없으면 번호로 생성
+});
+
+test('buildTodayLineup: null/빈 입력 안전', () => {
+  assert.deepEqual(DataService.buildTodayLineup(null, '수'), []);
+  assert.deepEqual(DataService.buildTodayLineup({}, '수'), []);
+  assert.deepEqual(DataService.buildTodayLineup({ '3층': [] }, null), []);
+});
+
 // ── review/OCR: applyOcrToInjection (사출계획 기록 경로) ────────────────────────
 // 2026-06-03(수) 기준: requestDay='수', next_date 2026-06-04(목) → nextDay='목'
 function makeInjData() {
