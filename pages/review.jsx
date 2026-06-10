@@ -147,7 +147,7 @@ function OcrLintPanel({ issues }) {
 
 function ReviewTable({
   filteredRows, stats, filter, setFilter, groupDecision, allBrands,
-  onNew, onUndo, onBrandChange, onMachineChange, onProductChange,
+  onNew, onUndo, onBrandChange, onMachineChange, onProductChange, onFixMaster,
 }) {
   return (
     <Card flush>
@@ -186,6 +186,7 @@ function ReviewTable({
                 allBrands={allBrands}
                 onBrandChange={(v) => onBrandChange(row, v)}
                 onAcceptBrandSuggestion={(v) => onBrandChange(row, v)}
+                onFixMaster={() => onFixMaster(row)}
                 onMachineChange={(v) => onMachineChange(row, v)}
                 onProductChange={(v) => onProductChange(row, v)}
               />
@@ -297,6 +298,20 @@ function ReviewPage({ ctx }) {
       for (const rk of rowKeys) delete next[rk];
       return next;
     });
+  };
+
+  // 마스터가 틀린 경우 — 마스터 제품의 brand를 요청서(OCR) 표기로 정정.
+  // 정책: 매칭이 안 맞으면 마스터를 현장 표기로 정정(별도 alias 안 만듦).
+  // setData 후 masterIndex가 재계산되어 해당 행은 자동으로 exact 매칭으로 전환된다.
+  const fixMasterBrand = (row) => {
+    const newBrand = String(row.brand || '').trim();
+    if (!newBrand || !row.matchedName) return;
+    const idx = data.products.findIndex(p => p.name === row.matchedName);
+    if (idx < 0) { notify('마스터에서 해당 제품을 찾을 수 없습니다'); return; }
+    const products = [...data.products];
+    products[idx] = { ...products[idx], brand: newBrand, customer: newBrand };
+    setData({ ...data, products });
+    notify(`마스터 정정: ${row.matchedName} brand → '${newBrand}'`);
   };
 
   // 호기 번호 인라인 편집 — rowKey 가 machine_no 를 포함하므로 decisions 키도 마이그레이션.
@@ -508,6 +523,7 @@ function ReviewPage({ ctx }) {
           onNew={handleNew}
           onUndo={handleUndo}
           onBrandChange={updateGroupBrand}
+          onFixMaster={fixMasterBrand}
           onMachineChange={updateGroupMachine}
           onProductChange={updateGroupProduct}
         />
@@ -529,7 +545,7 @@ function ReviewPage({ ctx }) {
 
 // ── 셀 component: 한 행 ──────────────────────────────────────────────────────
 
-function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange, onAcceptBrandSuggestion, onMachineChange, onProductChange }) {
+function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange, onAcceptBrandSuggestion, onFixMaster, onMachineChange, onProductChange }) {
   const renderStatus = () => {
     if (row.isTest) return <Pill tone="default">TEST</Pill>;
     if (decision?.action === 'auto') return <Pill tone="ok">자동 일치</Pill>;
@@ -609,14 +625,26 @@ function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange
       </td>
       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
         {!row.isTest && !decision && row.status === 'brand-mismatch' && (
-          <button
-            className="btn btn--sm btn--primary"
-            onClick={() => onAcceptBrandSuggestion && onAcceptBrandSuggestion(row.suggestedBrand)}
-            title={`brand를 '${row.suggestedBrand}' 로 정정해 자동 매칭`}
-            style={{ marginRight: 4 }}
-          >
-            <Icon name="check" size={11} /> {row.suggestedBrand}
-          </button>
+          <>
+            <button
+              className="btn btn--sm btn--primary"
+              onClick={() => onAcceptBrandSuggestion && onAcceptBrandSuggestion(row.suggestedBrand)}
+              title={`이 행의 brand를 마스터 표기 '${row.suggestedBrand}' 로 정정해 자동 매칭 (마스터가 맞는 경우)`}
+              style={{ marginRight: 4 }}
+            >
+              <Icon name="check" size={11} /> {row.suggestedBrand}
+            </button>
+            {String(row.brand || '').trim() && (
+              <button
+                className="btn btn--sm"
+                onClick={() => onFixMaster && onFixMaster()}
+                title={`마스터(${row.matchedName})의 brand를 요청서 표기 '${row.brand}' 로 정정 (마스터가 틀린 경우 — 현장 표기 우선 정책)`}
+                style={{ marginRight: 4 }}
+              >
+                <Icon name="edit" size={11} /> 마스터→{row.brand}
+              </button>
+            )}
+          </>
         )}
         {!row.isTest && !decision && (
           <button className="btn btn--sm" onClick={onNew} title="제품 및 잉크 등록">
