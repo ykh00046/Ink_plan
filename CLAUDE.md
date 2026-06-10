@@ -11,7 +11,7 @@
 # 서버 실행 (Python)
 cd scripts
 python server.py
-# http://127.0.0.1:8765
+# http://127.0.0.1:8766  (8765는 C:\X\Flow가 사용 — 충돌로 2026-06 변경)
 
 # 또는 VBS를 통한 백그라운드 실행
 start.vbs
@@ -28,7 +28,7 @@ node --test tests/data-service.test.js tests/ui-regressions.test.js tests/date-u
 ┌──────────────────┐     ┌───────────────┐     ┌──────────┐
 │  React SPA       │────▶│  Python HTTP  │────▶│  JSON     │
 │  (Babel in-browser)│    │  server.py    │     │  /data/db │
-│  index.html      │◀────│  (8765 port)  │     │  current  │
+│  index.html      │◀────│  (8766 port)  │     │  current  │
 │  pages/*.jsx     │     │  storage.py   │     │  .json    │
 │  data-service.js │     └───────────────┘     └──────────┘
 │  ui.jsx          │
@@ -61,7 +61,7 @@ pages/
 └── data-quality.jsx    # 데이터 품질
 
 scripts/
-├── server.py           # HTTP 서버 (ThreadingHTTPServer, port 8765)
+├── server.py           # HTTP 서버 (ThreadingHTTPServer, port 8766)
 ├── storage.py          # DB/백업 파일 I/O
 ├── settings_store.py   # 설정 저장
 ├── build_release.py    # 릴리스 빌드

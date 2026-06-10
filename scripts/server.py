@@ -24,7 +24,8 @@ from storage import (
 from settings_store import read_settings, write_settings
 
 
-PORT = 8765
+# 8766: C:\X\Flow(uvicorn)가 8765를 사용하므로 충돌 회피를 위해 영구 변경 (2026-06-10)
+PORT = 8766
 URL = f"http://127.0.0.1:{PORT}/"
 
 # 런타임 데이터(API 키/DB/백업/시드)는 정적 파일로 노출 금지 — /api/* 로만 접근.
@@ -33,7 +34,7 @@ BLOCKED_STATIC_PREFIX = "/data/"
 # 요청 본문 상한 (DB 저장용) — 메모리 보호
 MAX_BODY_BYTES = 64 * 1024 * 1024
 # /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
-ALLOWED_HOSTS = ("127.0.0.1:8765", "localhost:8765", "127.0.0.1", "localhost")
+ALLOWED_HOSTS = (f"127.0.0.1:{PORT}", f"localhost:{PORT}", "127.0.0.1", "localhost")
 
 
 def port_is_open():

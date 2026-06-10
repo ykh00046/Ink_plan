@@ -74,7 +74,7 @@ class ApiGuardTest(unittest.TestCase):
     """is_api_request_allowed — DNS rebinding(Host) / CSRF(Origin) 방어."""
 
     def test_local_host_without_origin_allowed(self):
-        self.assertTrue(make_handler({"Host": "127.0.0.1:8765"}).is_api_request_allowed())
+        self.assertTrue(make_handler({"Host": f"127.0.0.1:{server.PORT}"}).is_api_request_allowed())
 
     def test_localhost_host_allowed(self):
         self.assertTrue(make_handler({"Host": "localhost"}).is_api_request_allowed())
@@ -88,20 +88,22 @@ class ApiGuardTest(unittest.TestCase):
         self.assertFalse(make_handler({}).is_api_request_allowed())
 
     def test_same_origin_allowed(self):
-        h = make_handler({"Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:8765"})
+        local = f"127.0.0.1:{server.PORT}"
+        h = make_handler({"Host": local, "Origin": f"http://{local}"})
         self.assertTrue(h.is_api_request_allowed())
 
     def test_localhost_origin_allowed(self):
-        h = make_handler({"Host": "localhost:8765", "Origin": "http://localhost:8765"})
+        local = f"localhost:{server.PORT}"
+        h = make_handler({"Host": local, "Origin": f"http://{local}"})
         self.assertTrue(h.is_api_request_allowed())
 
     def test_cross_site_origin_blocked(self):
         # CSRF: 외부 사이트의 fetch — Origin netloc 이 로컬과 불일치
-        h = make_handler({"Host": "127.0.0.1:8765", "Origin": "http://evil.com"})
+        h = make_handler({"Host": f"127.0.0.1:{server.PORT}", "Origin": "http://evil.com"})
         self.assertFalse(h.is_api_request_allowed())
 
     def test_cross_site_origin_with_port_blocked(self):
-        h = make_handler({"Host": "127.0.0.1:8765", "Origin": "http://evil.com:8765"})
+        h = make_handler({"Host": f"127.0.0.1:{server.PORT}", "Origin": f"http://evil.com:{server.PORT}"})
         self.assertFalse(h.is_api_request_allowed())
 
 
