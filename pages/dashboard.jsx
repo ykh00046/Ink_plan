@@ -89,7 +89,7 @@ function DashboardPage({ ctx }) {
                 <div className="empty-state__hint">INK 요청서를 파싱하면 여기에 오늘 라인업이 표시됩니다.</div>
               </div>
             ) : (
-              <table className="table">
+              <table className="tbl">
                 <thead>
                   <tr>
                     <th style={{ width: 60 }}>층</th>
