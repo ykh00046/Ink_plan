@@ -366,6 +366,77 @@ test('normalize 헬퍼: 단일화된 동작 검증', () => {
   assert.equal(DataService.inkOfAssignment({ product: '파랑' }), '파랑');
 });
 
+// ── inventory: 엑셀 재고 조사표 가져오기 ─────────────────────────────────────────
+// 실파일(잉크 재고 조사표_5월.xlsx) 구조 본뜬 합성 rows: 헤더 행8, 부헤더(M/D) 행9
+const XLSX_ROWS = [
+  [], [null, '-9월 Ink 제조량'], [], [], [], [], [], [],
+  [null, '잉크명', 'Lot No.', '월', '화', '수', '목', '금', '토', '일', 'Lot No. 변경'],
+  [null, null, '제조 시', '5/11', '5/12', '5/13', '5/14', '5/15', null, null, '2차'],
+  [null, 'DARK', '051001', '3', '3', '3', null, null, null, null, null],
+  [null, 'SOUL', '051001', '9', '9', '9', null, null, null, null, null],
+  [null, 'NEWINK', '051099', null, null, '5', null, null, null, null, null],
+  [null, 'GHOST?', '051001', '1', null, '2,000', null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null, null, null], // 빈 행
+];
+
+test('parseInventorySheetRows: 헤더 탐색 + 요일 컬럼(M/D 라벨) + 데이터 행', () => {
+  const p = DataService.parseInventorySheetRows(XLSX_ROWS);
+  assert.equal(p.error, undefined);
+  assert.deepEqual(p.dateCols.map(d => d.label), ['5/11', '5/12', '5/13', '5/14', '5/15', '토', '일']);
+  assert.equal(p.dateCols[0].day, '월');
+  assert.equal(p.rows.length, 4); // 빈 행 제외
+  assert.equal(p.rows[0].ink, 'DARK');
+  assert.equal(p.rows[0].lotNo, '051001');
+  assert.equal(p.rows[0].values['5/13'], '3');
+  assert.equal(p.rows[2].values['5/11'], undefined); // NEWINK 는 수요일만
+});
+
+test('parseInventorySheetRows: 헤더 없으면 error', () => {
+  assert.equal(DataService.parseInventorySheetRows([[1, 2], [3]]).error, 'no-header');
+  assert.equal(DataService.parseInventorySheetRows(null).error, 'no-header');
+});
+
+test('buildInventoryImportPlan: 기존 lot→sets, 마스터만 있음→creates, 둘 다 없음→unknowns', () => {
+  const p = DataService.parseInventorySheetRows(XLSX_ROWS);
+  const data = {
+    machineAssignments: [
+      { ink: 'DARK', machine: '10호기', code: 'C1' },
+      { ink: 'SOUL', machine: '11호기', code: 'C2' },
+      { ink: 'NEWINK', machine: '12호기', code: 'C3' }, // 마스터엔 있으나 lot 없음
+    ],
+    inventory: {
+      lots: [
+        { id: 'L1', ink: 'DARK', lotNo: 'DA051101', registeredDate: '2026-05-11', order: 1, role: 'initial' },
+        { id: 'L2', ink: 'SOUL', lotNo: 'SO051101', registeredDate: '2026-05-11', order: 1, role: 'initial' },
+      ],
+      daily: {},
+    },
+  };
+  const plan = DataService.buildInventoryImportPlan(p, '5/13', data, '2026-05-13');
+  assert.deepEqual(plan.sets.map(s => [s.ink, s.lotId, s.value]), [['DARK', 'L1', 3], ['SOUL', 'L2', 9]]);
+  assert.deepEqual(plan.creates.map(c => [c.ink, c.lotNo, c.value]), [['NEWINK', '051099', 5]]);
+  assert.equal(plan.unknowns.length, 1);            // GHOST? — 마스터에 없음
+  assert.equal(plan.unknowns[0].value, 2000);        // 천단위 콤마 파싱
+});
+
+test('buildInventoryImportPlan: 값 없는 라벨·중복 잉크·비숫자 처리', () => {
+  const p = DataService.parseInventorySheetRows([
+    [null, '잉크명', 'Lot No.', '월'],
+    [null, null, '제조 시', '5/11'],
+    [null, 'DARK', 'A', '3'],
+    [null, 'DARK', 'B', '7'],     // 같은 잉크 중복 → 첫 행만
+    [null, 'SOUL', 'C', 'abc'],   // 비숫자 → 건너뜀
+  ]);
+  const data = {
+    machineAssignments: [{ ink: 'DARK', machine: '1', code: 'C' }],
+    inventory: { lots: [{ id: 'L1', ink: 'DARK', lotNo: 'X', registeredDate: '2026-05-11', order: 1, role: 'initial' }], daily: {} },
+  };
+  const plan = DataService.buildInventoryImportPlan(p, '5/11', data, '2026-05-13');
+  assert.equal(plan.sets.length, 1);
+  assert.equal(plan.sets[0].value, 3);
+  assert.equal(plan.unknowns.length, 0);
+});
+
 // ── dashboard: buildTodayLineup ──────────────────────────────────────────────
 test('buildTodayLineup: 오늘 요일에 값 있는 호기만, 층→호기번호 정렬', () => {
   const injection = {

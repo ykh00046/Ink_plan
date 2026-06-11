@@ -592,6 +592,62 @@ function InventoryPage({ ctx }) {
     setData({ ...data, inventory: { ...inv, order: next } });
   };
 
+  // ── 엑셀 재고 조사표 가져오기 ──
+  // 파싱(SheetJS)·계획 수립(DataService 순수 함수) 후 미리보기 모달 → 오늘 재고로 적용
+  const excelInputRef = useRef(null);
+  const [excelImport, setExcelImport] = useState(null); // { parsed, label, fileName } | null
+
+  const handleExcelFile = async (file) => {
+    if (!file) return;
+    if (typeof XLSX === 'undefined') { notify('엑셀 파서(xlsx.full.min.js)가 로드되지 않았습니다'); return; }
+    try {
+      const wb = XLSX.read(await file.arrayBuffer());
+      // 차트시트 등을 건너뛰고 '잉크명' 헤더가 있는 첫 시트 사용
+      let parsed = null;
+      for (const name of wb.SheetNames) {
+        const ws = wb.Sheets[name];
+        if (!ws || !ws['!ref']) continue;
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+        const p = DataService.parseInventorySheetRows(rows);
+        if (!p.error && p.rows.length) { parsed = p; break; }
+      }
+      if (!parsed) { notify('재고 조사표 형식(잉크명/Lot No. 헤더)을 찾지 못했습니다'); return; }
+      // 기본 컬럼 = 값이 있는 가장 최근(오른쪽) 날짜 컬럼
+      const withValues = parsed.dateCols.filter(dc => parsed.rows.some(r => r.values[dc.label] != null));
+      const defaultLabel = withValues.length ? withValues[withValues.length - 1].label : (parsed.dateCols[0]?.label || '');
+      setExcelImport({ parsed, label: defaultLabel, fileName: file.name });
+    } catch (e) {
+      console.error('엑셀 파싱 실패:', e);
+      notify(`엑셀 파싱 실패: ${e.message || e}`);
+    }
+  };
+
+  const excelPlan = useMemo(
+    () => excelImport ? DataService.buildInventoryImportPlan(excelImport.parsed, excelImport.label, data, today) : null,
+    [excelImport, data, today]
+  );
+
+  const applyExcelImport = () => {
+    if (!excelPlan) return;
+    let nextInv = { ...inv, lots: [...inv.lots], daily: { ...inv.daily } };
+    const dayMap = { ...(nextInv.daily[today] || {}) };
+    for (const s of excelPlan.sets) dayMap[s.lotId] = s.value;
+    for (const c of excelPlan.creates) {
+      const lotNo = (c.lotNo || DataService.nextInventoryLotNo(c.ink, today, nextInv.lots)).toUpperCase();
+      const lot = {
+        id: `L${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        ink: c.ink, lotNo, registeredDate: today, order: 1, role: 'initial',
+      };
+      nextInv.lots.push(lot);
+      nextInv.order = appendOrderForNewInitial(nextInv, lot);
+      dayMap[lot.id] = c.value;
+    }
+    nextInv.daily[today] = dayMap;
+    setData({ ...data, inventory: nextInv });
+    notify(`엑셀 가져오기 완료 — 입력 ${excelPlan.sets.length}건 · 신규 lot ${excelPlan.creates.length}건${excelPlan.unknowns.length ? ` · 제외 ${excelPlan.unknowns.length}건` : ''}`);
+    setExcelImport(null);
+  };
+
   const appendOrderForNewInitial = (currentInv, lot) => {
     const current = orderedInitialLots.map(l => l.id).filter(id => id !== lot.id);
     let insertAt = current.length;
@@ -783,6 +839,16 @@ function InventoryPage({ ctx }) {
             <button className="btn btn--sm" onClick={() => setBulkOpen(true)}>
               <Icon name="upload" size={11} /> 일괄 추가
             </button>
+            <button className="btn btn--sm" onClick={() => excelInputRef.current?.click()} title="잉크 재고 조사표(.xlsx)를 읽어 선택한 날짜 컬럼 값을 오늘 재고로 입력">
+              <Icon name="image" size={11} /> 엑셀 불러오기
+            </button>
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={e => { handleExcelFile(e.target.files?.[0]); e.target.value = ''; }}
+            />
             <button className="btn btn--sm" onClick={() => window.print()}>
               <Icon name="download" size={11} /> 인쇄
             </button>
@@ -921,6 +987,79 @@ function InventoryPage({ ctx }) {
           onAdd={handleBulkAdd}
           onClose={() => { setBulkOpen(false); setBulkResult(null); setBulkText(''); }}
         />
+      )}
+
+      {excelImport && excelPlan && (
+        <Modal
+          title={`엑셀 재고 가져오기 — ${excelImport.fileName}`}
+          onClose={() => setExcelImport(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setExcelImport(null)}>취소</button>
+              <button
+                className="btn btn--primary"
+                disabled={excelPlan.sets.length + excelPlan.creates.length === 0}
+                onClick={applyExcelImport}
+              >
+                <Icon name="check" size={12} /> 오늘({invFmtDate(today)}) 재고로 적용
+              </button>
+            </>
+          }
+        >
+          <div className="field" style={{ marginBottom: 10 }}>
+            <label className="field__label">가져올 날짜 컬럼</label>
+            <select
+              className="input select"
+              value={excelImport.label}
+              onChange={e => setExcelImport({ ...excelImport, label: e.target.value })}
+              style={{ width: 220 }}
+            >
+              {excelImport.parsed.dateCols.map(dc => (
+                <option key={`${dc.col}`} value={dc.label}>{dc.label} ({dc.day})</option>
+              ))}
+            </select>
+            <div className="field__hint">엑셀의 이 컬럼 값이 오늘 날짜 재고로 들어갑니다.</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, fontSize: 12 }}>
+            <span className="tag">기존 lot 입력 {excelPlan.sets.length}</span>
+            <span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)' }}>신규 lot {excelPlan.creates.length}</span>
+            {excelPlan.unknowns.length > 0 && (
+              <span className="tag" style={{ background: 'oklch(0.97 0.02 25)', color: 'var(--bad-600)' }}>마스터에 없어 제외 {excelPlan.unknowns.length}</span>
+            )}
+          </div>
+
+          <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid var(--ink-200)', borderRadius: 8 }}>
+            <table className="tbl">
+              <thead>
+                <tr><th>잉크</th><th>Lot</th><th className="num">값</th><th>처리</th></tr>
+              </thead>
+              <tbody>
+                {excelPlan.sets.slice(0, 100).map(s => (
+                  <tr key={`s-${s.lotId}`}>
+                    <td>{s.ink}</td><td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{s.lotNo}</td>
+                    <td className="num">{s.value}</td><td><span className="tag">기존 lot</span></td>
+                  </tr>
+                ))}
+                {excelPlan.creates.slice(0, 50).map((c, i) => (
+                  <tr key={`c-${i}`}>
+                    <td>{c.ink}</td><td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{c.lotNo || '(자동 생성)'}</td>
+                    <td className="num">{c.value}</td><td><span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)' }}>신규 등록</span></td>
+                  </tr>
+                ))}
+                {excelPlan.unknowns.slice(0, 50).map((u, i) => (
+                  <tr key={`u-${i}`} style={{ opacity: 0.55 }}>
+                    <td>{u.ink}</td><td>·</td>
+                    <td className="num">{u.value}</td><td><span className="tag" style={{ color: 'var(--bad-600)' }}>마스터에 없음 — 제외</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {excelPlan.sets.length > 100 && (
+            <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 6 }}>미리보기는 100행까지 — 적용은 전체 {excelPlan.sets.length + excelPlan.creates.length}건에 수행됩니다.</div>
+          )}
+        </Modal>
       )}
     </div>
   );

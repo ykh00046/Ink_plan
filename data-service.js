@@ -1236,6 +1236,95 @@
     return { nextData: newData, mergedByShift, skippedNoMachine, skippedNoMatch, mergedDays };
   }
 
+  // ── 엑셀 재고 조사표 가져오기 (pages/inventory.jsx 에서 사용) ──────────────────
+
+  // 시트 rows(array-of-arrays)에서 재고 조사표 구조 해석.
+  // 헤더 행('잉크명' 셀) 탐색 → Lot 컬럼 + 요일 컬럼(월~일, 부헤더의 M/D를 라벨로) 수집.
+  // 반환: { dateCols: [{col, day, label}], rows: [{ink, lotNo, values: {label: raw}}] }
+  function parseInventorySheetRows(rows) {
+    const list = rows || [];
+    let h = -1, inkCol = -1;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i] || [];
+      const j = r.findIndex(c => String(c == null ? '' : c).trim() === '잉크명');
+      if (j >= 0) { h = i; inkCol = j; break; }
+    }
+    if (h < 0) return { dateCols: [], rows: [], error: 'no-header' };
+    const hdr = list[h] || [];
+    const sub = list[h + 1] || [];
+    let lotCol = -1;
+    for (let j = 0; j < hdr.length; j++) {
+      if (j !== inkCol && lotCol < 0 && /lot/i.test(String(hdr[j] || ''))) lotCol = j;
+    }
+    const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+    const dateCols = [];
+    for (let j = 0; j < hdr.length; j++) {
+      const day = String(hdr[j] == null ? '' : hdr[j]).trim();
+      if (!DAYS.includes(day)) continue;
+      const label = String(sub[j] == null ? '' : sub[j]).trim();
+      dateCols.push({ col: j, day, label: label || day });
+    }
+    const out = [];
+    for (let i = h + 2; i < list.length; i++) {
+      const r = list[i] || [];
+      const ink = String(r[inkCol] == null ? '' : r[inkCol]).trim();
+      if (!ink) continue;
+      const lotNo = lotCol >= 0 ? String(r[lotCol] == null ? '' : r[lotCol]).trim() : '';
+      const values = {};
+      for (const dc of dateCols) {
+        const v = r[dc.col];
+        if (v != null && String(v).trim() !== '') values[dc.label] = v;
+      }
+      out.push({ ink, lotNo, values });
+    }
+    return { dateCols, rows: out };
+  }
+
+  // 선택한 날짜 라벨의 값을 '오늘 재고'로 넣는 실행 계획 (적용은 페이지에서).
+  //  · 기존 lot 보유 잉크 → sets (오늘 기준 actual lot 에 값)
+  //  · 잉크 마스터엔 있으나 lot 없음 → creates (lot 신규 등록 + 값)
+  //  · 마스터에도 없음 → unknowns (제외 — 미리보기 표시용)
+  // 같은 잉크가 여러 행이면 첫 행만 사용. 숫자 아닌 값은 건너뜀.
+  function buildInventoryImportPlan(parsed, label, data, todayISO) {
+    const lots = (data && data.inventory && data.inventory.lots) || [];
+    // buildInkMaster 는 원본 이름 배열 반환 → 정규화 lookup 으로 변환
+    const master = new Map();
+    for (const name of buildInkMaster(data || {})) {
+      const n = normalizeInkName(name);
+      if (n && !master.has(n)) master.set(n, name);
+    }
+    const lotInkByNorm = new Map();
+    for (const l of lots) {
+      const n = normalizeInkName(l.ink);
+      if (n && !lotInkByNorm.has(n)) lotInkByNorm.set(n, l.ink);
+    }
+    const sets = [], creates = [], unknowns = [];
+    const seen = new Set();
+    for (const row of (parsed && parsed.rows) || []) {
+      const raw = row.values ? row.values[label] : undefined;
+      if (raw == null || String(raw).trim() === '') continue;
+      const num = Number(String(raw).replace(/,/g, ''));
+      if (isNaN(num)) continue;
+      const norm = normalizeInkName(row.ink);
+      if (!norm || seen.has(norm)) continue;
+      seen.add(norm);
+      if (lotInkByNorm.has(norm)) {
+        const inkName = lotInkByNorm.get(norm);
+        const actual = actualInventoryLot(lots, inkName, todayISO);
+        if (actual) {
+          sets.push({ ink: inkName, lotId: actual.id, lotNo: actual.lotNo, value: num });
+          continue;
+        }
+      }
+      if (master.has(norm)) {
+        creates.push({ ink: master.get(norm), lotNo: row.lotNo || '', value: num });
+      } else {
+        unknowns.push({ ink: row.ink, value: num });
+      }
+    }
+    return { sets, creates, unknowns };
+  }
+
   // 오늘 사출 라인업 — 오늘 요일에 주/야간 제품이 잡힌 호기만 추림 (대시보드 read-only 패널)
   function buildTodayLineup(injection, todayKor) {
     const rows = [];
@@ -1516,6 +1605,8 @@
     lintOcrResult,
     buildOcrGroundingHints,
     buildTodayLineup,
+    parseInventorySheetRows,
+    buildInventoryImportPlan,
     // inventory
     inkLifeInfo,
     // 도메인 상수 (요일/교대) — 단일 출처
