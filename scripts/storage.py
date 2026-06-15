@@ -27,6 +27,9 @@ DB_DIR = DATA_DIR / "db"
 BACKUP_DIR = DATA_DIR / "backups"
 SEED_FILE = ASSET_ROOT / "data" / "clean.json"
 CURRENT_FILE = DB_DIR / "current.json"
+AUDIT_FILE = DB_DIR / "audit.json"
+# 감사 로그 추적 대상 — 생산계획 핵심 3개 도메인 (그 외 필드 변경은 잡음으로 제외)
+AUDIT_DOMAINS = ("injection", "products", "machineAssignments")
 _LOCK = threading.RLock()
 
 
@@ -104,17 +107,103 @@ def current_rev():
         return compute_rev(read_json(CURRENT_FILE))
 
 
-def write_current_checked(data, base_rev):
+def write_current_checked(data, base_rev, source=None):
     # base_rev=None 이면 무조건 기록(시드 폴백/레거시 클라이언트 호환).
     # 값이 있으면 현재 rev 와 일치할 때만 기록, 불일치 시 ConflictError 로 거부한다.
     # read-rev→compare→write 를 단일 _LOCK 안에서 수행해 TOCTOU 를 차단한다.
+    # source 가 주어지면, OCC 가 이미 읽은 before(현재본) 와 after(data) 로 변경분을
+    # diff 해 감사 로그에 append 한다 — 별도 재조회 없이 한 락 안에서 수행(동시편집 가드 재활용).
     with _LOCK:
         ensure_current()
-        cur = compute_rev(read_json(CURRENT_FILE))
+        before = read_json(CURRENT_FILE)
+        cur = compute_rev(before)
         if base_rev is not None and base_rev != cur:
             raise ConflictError(cur)
-        write_json_atomic(CURRENT_FILE, data)
+        write_json_atomic(CURRENT_FILE, data)        # 본 저장 우선
+        if source is not None:
+            # 감사 로그는 부가기능 — 기록 실패가 본 저장을 되돌리지 않도록 best-effort.
+            try:
+                append_audit(diff_audit(before, data), source)
+            except Exception:
+                pass
         return compute_rev(data)
+
+
+# ── 변경 감사 로그(audit-trail) — 저장 시점 변경분 append-only 기록 ──────────────
+
+def _audit_flatten(data):
+    # injection/products/machineAssignments 를 {field: value_summary} 로 평탄화.
+    # field 경로는 가운데점(·) 구분 — UI(parseAuditField)와 규약 일치.
+    d = data or {}
+    flat = {}
+    # injection 셀: floor·machine·day·shift → 제품명 (빈 셀은 키 자체를 만들지 않음)
+    for floor, machines in (d.get("injection") or {}).items():
+        for m in (machines or []):
+            m = m or {}
+            machine = str(m.get("machine") or m.get("name") or "")
+            for day, shifts in (m.get("schedule") or {}).items():
+                for shift, value in (shifts or {}).items():
+                    if value:
+                        flat[f"injection·{floor}·{machine}·{day}·{shift}"] = str(value)
+    # products: name → "brand|ink1,ink2"
+    for p in (d.get("products") or []):
+        p = p or {}
+        name = str(p.get("name") or "")
+        if not name:
+            continue
+        brand = str(p.get("brand") or "")
+        inks = ",".join(str(i) for i in (p.get("inks") or []) if i)
+        flat[f"products·{name}"] = f"{brand}|{inks}"
+    # machineAssignments: ink → "machine|code" (구버전 ink/product/name 호환)
+    for a in (d.get("machineAssignments") or []):
+        a = a or {}
+        ink = str(a.get("ink") or a.get("product") or a.get("name") or "").strip()
+        if not ink:
+            continue
+        flat[f"machineAssignments·{ink}"] = f"{a.get('machine') or ''}|{a.get('code') or ''}"
+    return flat
+
+
+def diff_audit(before, after):
+    # 변경된 항목만 [{field, before, after}] 로 반환 (field 정렬 — 안정적 순서).
+    b, a = _audit_flatten(before), _audit_flatten(after)
+    out = []
+    for key in sorted(set(b) | set(a)):
+        bv, av = b.get(key), a.get(key)
+        if bv != av:
+            out.append({"field": key, "before": bv, "after": av})
+    return out
+
+
+def read_audit(limit=None):
+    # audit.json(JSON 배열) 읽기. 조회는 절대 throw 하지 않음 — 손상/부재 시 빈 목록.
+    with _LOCK:
+        if not AUDIT_FILE.exists():
+            return []
+        try:
+            entries = read_json(AUDIT_FILE)
+        except (ValueError, OSError):
+            return []
+        if not isinstance(entries, list):
+            return []
+        return entries[-limit:] if limit else entries
+
+
+def append_audit(changes, source, ts=None):
+    # diff_audit 결과를 audit.json 에 append. 빈 변경은 무시(잡음 0). 추가 건수 반환.
+    if not changes:
+        return 0
+    ts = ts or datetime.now().isoformat(timespec="seconds")
+    src = str(source or "")
+    records = [
+        {"ts": ts, "field": c["field"], "before": c["before"], "after": c["after"], "source": src}
+        for c in changes
+    ]
+    with _LOCK:
+        existing = read_audit()
+        existing.extend(records)
+        write_json_atomic(AUDIT_FILE, existing)
+    return len(records)
 
 
 def backup_name(now=None):

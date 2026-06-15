@@ -173,5 +173,131 @@ class OptimisticConcurrencyTest(unittest.TestCase):
                 self.assertEqual(storage.read_json(current)["v"], 9)
 
 
+class AuditTrailTest(unittest.TestCase):
+    """diff_audit / append_audit / read_audit — 변경 감사 로그(append-only)."""
+
+    def _patch_audit(self, td):
+        db = Path(td) / "db"
+        db.mkdir()
+        return patch.object(storage, "AUDIT_FILE", db / "audit.json")
+
+    def _setup_current(self, td, content):
+        db = Path(td) / "db"
+        backups = Path(td) / "backups"
+        seed = Path(td) / "clean.json"
+        db.mkdir()
+        backups.mkdir()
+        seed.write_text("{}", encoding="utf-8")
+        current = db / "current.json"
+        current.write_text(json.dumps(content), encoding="utf-8")
+        return db, backups, seed, current
+
+    def test_diff_injection_add_change_remove(self):
+        before = {"injection": {"3층": [
+            {"machine": "10호기", "schedule": {"월": {"day": "OLD", "night": "GONE"}}},
+        ]}}
+        after = {"injection": {"3층": [
+            {"machine": "10호기", "schedule": {"월": {"day": "NEW", "night": ""}}},
+        ]}}
+        changes = {c["field"]: c for c in storage.diff_audit(before, after)}
+        self.assertEqual(changes["injection·3층·10호기·월·day"]["before"], "OLD")
+        self.assertEqual(changes["injection·3층·10호기·월·day"]["after"], "NEW")
+        # night: GONE → 빈 셀(삭제) — after 측 키가 없으므로 None
+        self.assertEqual(changes["injection·3층·10호기·월·night"]["before"], "GONE")
+        self.assertIsNone(changes["injection·3층·10호기·월·night"]["after"])
+
+    def test_diff_products_and_assignments(self):
+        before = {
+            "products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}],
+            "machineAssignments": [{"ink": "i1", "machine": "10호기", "code": ""}],
+        }
+        after = {
+            "products": [{"name": "A", "brand": "PIA", "inks": ["i1", "i2"]}],
+            "machineAssignments": [{"ink": "i1", "machine": "10호기", "code": "INK-001"}],
+        }
+        changes = {c["field"]: c for c in storage.diff_audit(before, after)}
+        self.assertEqual(changes["products·A"]["before"], "PIA|i1")
+        self.assertEqual(changes["products·A"]["after"], "PIA|i1,i2")
+        self.assertEqual(changes["machineAssignments·i1"]["before"], "10호기|")
+        self.assertEqual(changes["machineAssignments·i1"]["after"], "10호기|INK-001")
+
+    def test_diff_no_change_is_empty(self):
+        data = {"injection": {"3층": [{"machine": "10호기", "schedule": {"월": {"day": "X"}}}]},
+                "products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}]}
+        # 동일 내용(키 순서만 달라도) → 변경 0건
+        self.assertEqual(storage.diff_audit(data, json.loads(json.dumps(data))), [])
+
+    def test_diff_ignores_untracked_fields(self):
+        # inventory/inkPlan 등 추적 대상 외 변경은 무시
+        before = {"inventory": {"daily": {}}, "products": []}
+        after = {"inventory": {"daily": {"2026-06-15": {"L1": 5}}}, "products": []}
+        self.assertEqual(storage.diff_audit(before, after), [])
+
+    def test_append_and_read_accumulate(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self._patch_audit(td):
+                n1 = storage.append_audit(
+                    [{"field": "products·A", "before": None, "after": "x"}], "products", ts="2026-06-15T10:00:00")
+                n2 = storage.append_audit(
+                    [{"field": "products·B", "before": "y", "after": "z"}], "machines", ts="2026-06-15T11:00:00")
+                self.assertEqual((n1, n2), (1, 1))
+                log = storage.read_audit()
+                self.assertEqual(len(log), 2)
+                self.assertEqual(log[0]["source"], "products")  # 누적 순서(시간순)
+                self.assertEqual(log[1]["field"], "products·B")
+                self.assertEqual(storage.read_audit(limit=1)[0]["field"], "products·B")  # 마지막 1건
+
+    def test_append_empty_changes_is_noop(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self._patch_audit(td):
+                self.assertEqual(storage.append_audit([], "web"), 0)
+                self.assertEqual(storage.read_audit(), [])
+                self.assertFalse(storage.AUDIT_FILE.exists())  # 빈 변경은 파일조차 만들지 않음
+
+    def test_read_audit_corrupt_returns_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self._patch_audit(td):
+                storage.AUDIT_FILE.write_text("{bad json", encoding="utf-8")
+                self.assertEqual(storage.read_audit(), [])  # 손상 시 throw 없이 []
+
+    def test_write_current_checked_appends_audit_when_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(
+                td, {"products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}]})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), \
+                 patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current), \
+                 patch.object(storage, "AUDIT_FILE", db / "audit.json"):
+                base = storage.compute_rev(storage.read_json(current))
+                storage.write_current_checked(
+                    {"products": [{"name": "A", "brand": "PIA", "inks": ["i1", "i2"]}]}, base, source="products")
+                log = storage.read_audit()
+                self.assertEqual(len(log), 1)
+                self.assertEqual(log[0]["field"], "products·A")
+                self.assertEqual(log[0]["source"], "products")
+
+    def test_write_current_checked_no_source_no_audit(self):
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(td, {"v": 1})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), \
+                 patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current), \
+                 patch.object(storage, "AUDIT_FILE", db / "audit.json"):
+                storage.write_current_checked({"v": 2}, None)  # source 없음
+                self.assertEqual(storage.read_audit(), [])
+
+    def test_audit_failure_does_not_block_save(self):
+        # 감사 로그 기록이 실패해도 본 저장(current.json)은 정상 커밋되어야 한다(best-effort).
+        with tempfile.TemporaryDirectory() as td:
+            db, backups, seed, current = self._setup_current(
+                td, {"products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}]})
+            with patch.object(storage, "DB_DIR", db), patch.object(storage, "BACKUP_DIR", backups), \
+                 patch.object(storage, "SEED_FILE", seed), patch.object(storage, "CURRENT_FILE", current), \
+                 patch.object(storage, "append_audit", side_effect=RuntimeError("disk full")):
+                base = storage.compute_rev(storage.read_json(current))
+                new_after = {"products": [{"name": "A", "brand": "PIA", "inks": ["i1", "i2"]}]}
+                rev = storage.write_current_checked(new_after, base, source="products")
+                self.assertEqual(rev, storage.compute_rev(new_after))
+                self.assertEqual(storage.read_json(current)["products"][0]["inks"], ["i1", "i2"])
+
+
 if __name__ == "__main__":
     unittest.main()

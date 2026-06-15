@@ -67,6 +67,8 @@ def _patch_storage(td, content):
         patch.object(storage, "BACKUP_DIR", backups),
         patch.object(storage, "SEED_FILE", seed),
         patch.object(storage, "CURRENT_FILE", current),
+        # 감사 로그도 임시 디렉터리로 격리 — POST 테스트가 실데이터 audit.json 을 오염시키지 않도록.
+        patch.object(storage, "AUDIT_FILE", db / "audit.json"),
     ], current
 
 
@@ -318,6 +320,102 @@ class SeedApiTest(unittest.TestCase):
                 for p in patches:
                     p.stop()
             self.assertEqual(cap["status"], 404)
+
+
+class AuditApiTest(unittest.TestCase):
+    """GET /api/audit — 변경 감사 로그 조회(최신순·상한) + POST 저장 시 source 기록."""
+
+    def test_audit_path_blocked_static(self):
+        # audit.json 은 /data/db/ 하위 → 정적 노출 차단(API 로만).
+        self.assertTrue(make_handler(path="/data/db/audit.json").is_blocked_static())
+
+    def test_get_audit_returns_newest_first(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                storage.append_audit([{"field": "products·A", "before": None, "after": "x"}], "products", ts="2026-06-15T10:00:00")
+                storage.append_audit([{"field": "products·B", "before": None, "after": "y"}], "machines", ts="2026-06-15T11:00:00")
+                h, cap = make_get_handler("/api/audit")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(cap["status"], 200)
+            self.assertEqual(len(cap["payload"]), 2)
+            self.assertEqual(cap["payload"][0]["field"], "products·B")  # 최신순
+            self.assertEqual(cap["payload"][1]["field"], "products·A")
+
+    def test_get_audit_respects_limit(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                for i in range(5):
+                    storage.append_audit([{"field": f"products·{i}", "before": None, "after": str(i)}], "web", ts=f"2026-06-15T10:0{i}:00")
+                h, cap = make_get_handler("/api/audit?limit=2")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(len(cap["payload"]), 2)
+            self.assertEqual(cap["payload"][0]["field"], "products·4")  # 가장 최신 2건
+
+    def test_get_audit_empty_when_no_log(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            for p in patches:
+                p.start()
+            try:
+                h, cap = make_get_handler("/api/audit")
+                h.do_GET()
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertEqual(cap["status"], 200)
+            self.assertEqual(cap["payload"], [])
+
+    def test_post_db_records_audit_with_source(self):
+        # POST /api/db 가 X-Edit-Source 를 감사 로그 source 로 기록한다.
+        before = {"injection": {"3층": [{"machine": "10호기", "schedule": {"월": {"day": "", "night": ""}}}]}}
+        after = {"injection": {"3층": [{"machine": "10호기", "schedule": {"월": {"day": "PIA블루", "night": ""}}}]}}
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, before)
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps(after).encode("utf-8")
+                h, cap = make_post_handler(body, headers={"X-Edit-Source": "injection"}, path="/api/db")
+                h.do_POST()
+                self.assertEqual(cap["status"], 200)
+                log = storage.read_audit()
+                self.assertEqual(len(log), 1)
+                self.assertEqual(log[0]["field"], "injection·3층·10호기·월·day")
+                self.assertEqual(log[0]["after"], "PIA블루")
+                self.assertEqual(log[0]["source"], "injection")
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_post_db_defaults_source_to_web(self):
+        before = {"products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}]}
+        after = {"products": [{"name": "A", "brand": "PIA", "inks": ["i1", "i2"]}]}
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, before)
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps(after).encode("utf-8")
+                h, cap = make_post_handler(body, path="/api/db")  # 헤더 없음
+                h.do_POST()
+                log = storage.read_audit()
+                self.assertEqual(len(log), 1)
+                self.assertEqual(log[0]["source"], "web")
+            finally:
+                for p in patches:
+                    p.stop()
 
 
 if __name__ == "__main__":

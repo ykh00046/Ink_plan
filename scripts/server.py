@@ -20,6 +20,7 @@ from storage import (
     read_backup,
     restore_backup,
     prune_backups,
+    read_audit,
 )
 from settings_store import read_settings, write_settings
 
@@ -142,6 +143,17 @@ class Handler(SimpleHTTPRequestHandler):
             except FileNotFoundError:
                 self.send_json({"error": "backup not found"}, 404)
             return
+        if path == "/api/audit":
+            # 변경 감사 로그 — 최신순 + 상한(기본 500, 최대 2000). audit.json 자체는
+            # /data/ 정적 차단 트리에 있어 이 API 로만 노출된다.
+            try:
+                limit = int((parse_qs(parsed.query).get("limit") or ["500"])[0])
+            except (TypeError, ValueError):
+                limit = 500
+            limit = max(1, min(limit, 2000))
+            entries = read_audit()
+            self.send_json(list(reversed(entries))[:limit])
+            return
         if path == "/api/settings":
             self.send_json(read_settings())
             return
@@ -176,7 +188,9 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "invalid json"}, 400)
                     return
                 # If-Match 기준 리비전과 현재 rev 가 일치할 때만 기록(OCC). 없으면 무조건 기록.
-                new_rev = write_current_checked(data, self._if_match_rev())
+                # X-Edit-Source: 편집 화면 식별자 — 감사 로그 source. 누락 시 'web'.
+                source = self.headers.get("X-Edit-Source") or "web"
+                new_rev = write_current_checked(data, self._if_match_rev(), source=source)
                 self.send_json({"ok": True, "rev": new_rev},
                                headers={"ETag": f'"{new_rev}"'})
                 return

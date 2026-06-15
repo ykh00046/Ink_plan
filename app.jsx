@@ -57,6 +57,7 @@ const NAV = [
     { id: 'injection',  step: '4', label: '사출계획',        icon: 'injection' },
     { id: 'ink-plan',   step: '5', label: '잉크 생산계획',   icon: 'ink' },
     { id: 'history',    label: '기록 조회', icon: 'history' },
+    { id: 'audit',      label: '변경 이력', icon: 'history' },
   ]},
   { group: '현장 공급', items: [
     { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add',    desc: '오늘·내일 공급 (자동 누적)' },
@@ -80,7 +81,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 57;
+const APP_REV = 58;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -103,6 +104,8 @@ function App() {
   const dbRevRef = useRef(null);      // 서버 DB 리비전(ETag) — 다중 탭 OCC 의 base
   const lastSyncedRef = useRef(null); // 마지막으로 서버와 일치한 data — 3-way 병합·skip 의 base
   const [conflictState, setConflictState] = useState(null); // {local,server,serverRev,conflictKeys}|null
+  const viewRef = useRef(view);       // 저장 시 X-Edit-Source(감사 로그 출처)로 현재 화면 전달
+  viewRef.current = view;
 
   // 초기 로드: 파일 DB API 우선, 실패하면 localStorage → /api/seed fallback
   useEffect(() => {
@@ -185,6 +188,7 @@ function App() {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                'X-Edit-Source': viewRef.current || 'web',
                 ...(baseRev ? { 'If-Match': `"${baseRev}"` } : {}),
               },
               body: JSON.stringify(payload),
@@ -344,7 +348,7 @@ function App() {
     try {
       const r = await fetch('/api/db', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(c.serverRev ? { 'If-Match': `"${c.serverRev}"` } : {}) },
+        headers: { 'Content-Type': 'application/json', 'X-Edit-Source': viewRef.current || 'web', ...(c.serverRev ? { 'If-Match': `"${c.serverRev}"` } : {}) },
         body: JSON.stringify(c.local),
       });
       if (!r.ok) throw new Error(`file DB ${r.status}`);
@@ -450,6 +454,7 @@ function App() {
         {view === 'injection' && <InjectionPage ctx={ctx} />}
         {view === 'ink-plan' && <InkPlanPage ctx={ctx} />}
         {view === 'history' && <HistoryPage ctx={ctx} />}
+        {view === 'audit' && <AuditPage ctx={ctx} />}
         {view === 'ink-add' && <InkAddPage ctx={ctx} />}
         {view === 'chemicals' && <ChemicalsPage ctx={ctx} />}
         {view === 'products' && <ProductsPage ctx={ctx} />}

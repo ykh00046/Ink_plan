@@ -1492,6 +1492,68 @@
   // 전체 스냅샷 저장 모델에서 top-level 섹션(products/inkPlan/injection/…) 단위로
   // base(마지막 동기화본)·local(내 편집)·server(최신본)를 비교한다. 키 순서 무관
   // 정규화 비교(stableEqual)는 서버 compute_rev(sort_keys)의 "내용 동일" 개념과 일치.
+  // History snapshot row diff
+  // Design Ref: history-snapshot-diff section 3 - stable composite-key row comparison.
+  function compareHistoryRows(baseRows, currentRows, keyFields, valueFields) {
+    baseRows = Array.isArray(baseRows) ? baseRows : [];
+    currentRows = Array.isArray(currentRows) ? currentRows : [];
+    keyFields = Array.isArray(keyFields) ? keyFields : [];
+    valueFields = Array.isArray(valueFields) ? valueFields : [];
+
+    var keyOf = function (row) {
+      return keyFields.map(function (field) {
+        return String(row && row[field] != null ? row[field] : '');
+      }).join('\u001f');
+    };
+    var baseByKey = new Map(baseRows.map(function (row) { return [keyOf(row), row]; }));
+    var currentByKey = new Map(currentRows.map(function (row) { return [keyOf(row), row]; }));
+    var keys = Array.from(new Set(
+      Array.from(baseByKey.keys()).concat(Array.from(currentByKey.keys()))
+    )).sort();
+    var summary = { added: 0, changed: 0, removed: 0, unchanged: 0, totalChanges: 0 };
+
+    var rows = keys.map(function (key) {
+      var before = baseByKey.get(key) || null;
+      var after = currentByKey.get(key) || null;
+      var change = 'unchanged';
+      if (!before) change = 'added';
+      else if (!after) change = 'removed';
+      else if (!stableEqual(
+        valueFields.map(function (field) { return before[field]; }),
+        valueFields.map(function (field) { return after[field]; })
+      )) change = 'changed';
+
+      summary[change]++;
+      if (change !== 'unchanged') summary.totalChanges++;
+
+      var detail = '';
+      if (change === 'changed') {
+        detail = valueFields
+          .filter(function (field) { return !stableEqual(before[field], after[field]); })
+          .map(function (field) {
+            var oldValue = before[field] == null || before[field] === '' ? '-' : before[field];
+            var newValue = after[field] == null || after[field] === '' ? '-' : after[field];
+            return String(oldValue) + ' -> ' + String(newValue);
+          })
+          .join(' / ');
+      } else if (change === 'added') {
+        detail = '현재 데이터에 추가';
+      } else if (change === 'removed') {
+        detail = '현재 데이터에서 삭제';
+      }
+
+      return Object.assign({}, after || before || {}, {
+        _change: change,
+        _before: before,
+        _after: after,
+        _changeDetail: detail,
+      });
+    });
+
+    return { rows: rows, summary: summary };
+  }
+
+  // Concurrent edit comparison helpers continue below.
   function stableStringify(v) {
     if (v === undefined) return 'null';
     if (v === null || typeof v !== 'object') return JSON.stringify(v);
@@ -1539,6 +1601,57 @@
     };
   }
 
+  // ── 변경 감사 로그(audit-trail) 표시용 순수 헬퍼 ─────────────────────────────
+  // 서버(storage.diff_audit)가 만든 field 경로 규약과 일치해야 한다.
+
+  var AUDIT_KIND_LABEL = Object.freeze({
+    injection: '사출계획',
+    products: '제품 마스터',
+    machineAssignments: '잉크 배정',
+  });
+
+  // "injection·3층·10호기·월·day" → { kind, kindLabel, target, detail }
+  function parseAuditField(field) {
+    var parts = String(field == null ? '' : field).split('·');
+    var kind = parts[0] || '';
+    var kindLabel = AUDIT_KIND_LABEL[kind] || kind;
+    if (kind === 'injection') {
+      var floor = parts[1] || '', machine = parts[2] || '', day = parts[3] || '', shift = parts[4] || '';
+      var shiftLabel = shift === 'day' ? '주간' : (shift === 'night' ? '야간' : shift);
+      return {
+        kind: kind,
+        kindLabel: kindLabel,
+        target: [floor, machine].filter(Boolean).join(' '),
+        detail: [day, shiftLabel].filter(Boolean).join('/'),
+      };
+    }
+    return { kind: kind, kindLabel: kindLabel, target: parts.slice(1).join('·'), detail: '' };
+  }
+
+  // before/after 로 변경 유형 판정. 빈 값 = null|undefined|''.
+  function auditChangeKind(before, after) {
+    var emptyB = before === null || before === undefined || before === '';
+    var emptyA = after === null || after === undefined || after === '';
+    if (emptyB && !emptyA) return 'added';
+    if (!emptyB && emptyA) return 'removed';
+    return 'changed';
+  }
+
+  // 엔트리 배열 → { total, byKind, bySource } 집계 (헤더 요약용)
+  function summarizeAuditEntries(entries) {
+    var byKind = {};
+    var bySource = {};
+    var list = entries || [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i] || {};
+      var kind = parseAuditField(e.field).kind || 'unknown';
+      byKind[kind] = (byKind[kind] || 0) + 1;
+      var src = e.source || 'web';
+      bySource[src] = (bySource[src] || 0) + 1;
+    }
+    return { total: list.length, byKind: byKind, bySource: bySource };
+  }
+
   return {
     getInjectionColumns,
     moveInjectionCell,
@@ -1577,7 +1690,12 @@
     filterByQuery,
     // 다중 탭 동시편집 가드 (순수 함수)
     stableEqual,
+    compareHistoryRows,
     resolveConcurrentEdit,
+    // 변경 감사 로그(audit-trail) 표시 헬퍼
+    parseAuditField,
+    auditChangeKind,
+    summarizeAuditEntries,
     // 공유 normalize 헬퍼
     normalizeProductName,
     normalizeBrand,

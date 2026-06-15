@@ -1,5 +1,27 @@
 // Read-only history viewer backed by saved backup snapshots.
 
+const HISTORY_COMPARE_CONFIG = {
+  injection: {
+    keyFields: ['floor', 'machine', 'day', 'shift'],
+    valueFields: ['value'],
+  },
+  ink: {
+    keyFields: ['name', 'day'],
+    valueFields: ['values'],
+  },
+  inventory: {
+    keyFields: ['date', 'ink', 'lotNo'],
+    valueFields: ['value'],
+  },
+};
+
+const HISTORY_CHANGE_META = {
+  added: { label: '추가', symbol: '+', tone: 'added' },
+  changed: { label: '변경', symbol: '~', tone: 'changed' },
+  removed: { label: '삭제', symbol: '-', tone: 'removed' },
+  unchanged: { label: '동일', symbol: '=', tone: 'unchanged' },
+};
+
 function HistoryPage({ ctx }) {
   const { data, notify } = ctx;
   const [backups, setBackups] = useState([]);
@@ -7,6 +29,7 @@ function HistoryPage({ ctx }) {
   const [snapshot, setSnapshot] = useState(data);
   const [tab, setTab] = useState('injection');
   const [query, setQuery] = useState('');
+  const [changesOnly, setChangesOnly] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loadBackups = () => {
@@ -25,9 +48,10 @@ function HistoryPage({ ctx }) {
   useEffect(() => { loadBackups(); }, []);
 
   const selectSnapshot = (name) => {
-    setSelected(name);
     setQuery('');
+    setChangesOnly(false);
     if (name === 'current') {
+      setSelected(name);
       setSnapshot(data);
       return;
     }
@@ -37,7 +61,10 @@ function HistoryPage({ ctx }) {
         if (!r.ok) throw new Error(`backup ${r.status}`);
         return r.json();
       })
-      .then(raw => setSnapshot(migrateData(raw)))
+      .then(raw => {
+        setSnapshot(migrateData(raw));
+        setSelected(name);
+      })
       .catch(e => {
         console.warn('backup load failed:', e);
         notify('선택한 기록을 열지 못했습니다');
@@ -55,17 +82,45 @@ function HistoryPage({ ctx }) {
     ...backups.map(b => ({ name: b.name, label: formatBackupName(b.name) })),
   ], [backups]);
 
-  const rows = useMemo(() => {
-    if (tab === 'injection') return buildInjectionRows(snapshot);
-    if (tab === 'ink') return buildInkPlanRows(snapshot);
-    return buildInventoryRows(snapshot);
-  }, [snapshot, tab]);
+  const snapshotRows = useMemo(() => buildHistoryRows(snapshot, tab), [snapshot, tab]);
+  const currentRows = useMemo(() => buildHistoryRows(data, tab), [data, tab]);
+  const comparison = useMemo(() => {
+    if (selected === 'current') {
+      return {
+        rows: snapshotRows,
+        summary: {
+          added: 0,
+          changed: 0,
+          removed: 0,
+          unchanged: snapshotRows.length,
+          totalChanges: 0,
+        },
+      };
+    }
+    const config = HISTORY_COMPARE_CONFIG[tab];
+    return DataService.compareHistoryRows(
+      snapshotRows,
+      currentRows,
+      config.keyFields,
+      config.valueFields,
+    );
+  }, [selected, snapshotRows, currentRows, tab]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(row => Object.values(row).some(v => String(v || '').toLowerCase().includes(q)));
-  }, [rows, query]);
+    return comparison.rows.filter(row => {
+      if (changesOnly && row._change === 'unchanged') return false;
+      if (!q) return true;
+      return Object.values(row).some(v => {
+        if (v && typeof v === 'object') return false;
+        return String(v || '').toLowerCase().includes(q);
+      });
+    });
+  }, [comparison.rows, query, changesOnly]);
+
+  const comparing = selected !== 'current';
+  const diff = comparison.summary;
+  const filteredEmpty = '조건에 맞는 변경 기록이 없습니다';
 
   return (
     <div className="page history-page">
@@ -73,7 +128,7 @@ function HistoryPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">기록 조회</div>
-            <div className="page__meta">백업 시점의 사출계획, 잉크 생산계획, 재고 조사 내용을 읽기 전용으로 확인</div>
+            <div className="page__meta">백업 시점의 사출계획, 잉크 생산계획, 재고 조사 내용을 현재 데이터와 비교</div>
           </div>
           <div className="page__actions">
             <button className="btn" onClick={loadBackups}><Icon name="refresh" size={12} /> 새로고침</button>
@@ -109,6 +164,20 @@ function HistoryPage({ ctx }) {
             <div className="history-summary__item"><span>LOT</span><strong>{summary.lots}</strong></div>
           </div>
 
+          <div className={`history-diff ${comparing ? 'history-diff--active' : ''}`}>
+            <div>
+              <strong>{comparing ? '현재 대비 변화' : '현재 데이터 조회 중'}</strong>
+              <span>{comparing ? formatBackupName(selected) : '백업을 선택하면 현재 데이터와의 차이를 표시합니다.'}</span>
+            </div>
+            {comparing && (
+              <div className="history-diff__counts" aria-label="현재 대비 변화 요약">
+                <HistoryDiffCount type="added" count={diff.added} />
+                <HistoryDiffCount type="changed" count={diff.changed} />
+                <HistoryDiffCount type="removed" count={diff.removed} />
+              </div>
+            )}
+          </div>
+
           <Card flush>
             <div className="toolbar">
               <Seg
@@ -127,6 +196,16 @@ function HistoryPage({ ctx }) {
                 placeholder="기록 안에서 검색"
                 style={{ minWidth: 220 }}
               />
+              {comparing && (
+                <label className="history-change-filter">
+                  <input
+                    type="checkbox"
+                    checked={changesOnly}
+                    onChange={e => setChangesOnly(e.target.checked)}
+                  />
+                  변경 항목만
+                </label>
+              )}
               <div className="spacer" />
               <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>
                 {loading ? '불러오는 중...' : `${filtered.length}건`}
@@ -134,15 +213,15 @@ function HistoryPage({ ctx }) {
             </div>
 
             <div className="tbl-wrap history-table-wrap">
-              {tab === 'injection' && <HistoryTable rows={filtered} columns={[
+              {tab === 'injection' && <HistoryTable comparing={comparing} rows={filtered} columns={[
                 ['floor', '층'], ['machine', '사출기'], ['day', '요일'], ['shift', '구분'], ['value', '제품'],
-              ]} empty="저장된 사출 배정이 없습니다" />}
-              {tab === 'ink' && <HistoryTable rows={filtered} columns={[
+              ]} empty={changesOnly ? filteredEmpty : '저장된 사출 배정이 없습니다'} />}
+              {tab === 'ink' && <HistoryTable comparing={comparing} rows={filtered} columns={[
                 ['name', '잉크'], ['day', '요일'], ['values', '기록값'],
-              ]} empty="저장된 잉크 생산계획이 없습니다" />}
-              {tab === 'inventory' && <HistoryTable rows={filtered} columns={[
+              ]} empty={changesOnly ? filteredEmpty : '저장된 잉크 생산계획이 없습니다'} />}
+              {tab === 'inventory' && <HistoryTable comparing={comparing} rows={filtered} columns={[
                 ['date', '날짜'], ['ink', '잉크'], ['lotNo', 'LOT'], ['value', '재고'],
-              ]} empty="저장된 재고 조사 기록이 없습니다" />}
+              ]} empty={changesOnly ? filteredEmpty : '저장된 재고 조사 기록이 없습니다'} />}
             </div>
           </Card>
         </div>
@@ -151,26 +230,50 @@ function HistoryPage({ ctx }) {
   );
 }
 
-function HistoryTable({ rows, columns, empty }) {
+function HistoryDiffCount({ type, count }) {
+  const meta = HISTORY_CHANGE_META[type];
+  return <span className={`history-diff__count history-change--${meta.tone}`}>{meta.symbol}{count} {meta.label}</span>;
+}
+
+function HistoryTable({ rows, columns, empty, comparing }) {
   return (
     <table className="tbl history-table">
       <thead>
         <tr>
+          {comparing && <th style={{ width: 72 }}>상태</th>}
           {columns.map(([key, label]) => <th key={key}>{label}</th>)}
+          {comparing && <th>이전 → 현재</th>}
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, idx) => (
-          <tr key={idx}>
-            {columns.map(([key]) => <td key={key}>{row[key] || '-'}</td>)}
-          </tr>
-        ))}
+        {rows.map((row, idx) => {
+          const meta = HISTORY_CHANGE_META[row._change] || HISTORY_CHANGE_META.unchanged;
+          return (
+            <tr key={idx} className={comparing ? `history-row--${meta.tone}` : ''}>
+              {comparing && (
+                <td>
+                  <span className={`history-change history-change--${meta.tone}`}>
+                    {meta.symbol} {meta.label}
+                  </span>
+                </td>
+              )}
+              {columns.map(([key]) => <td key={key}>{row[key] ?? '-'}</td>)}
+              {comparing && <td className="history-change-detail">{row._changeDetail || '-'}</td>}
+            </tr>
+          );
+        })}
         {rows.length === 0 && (
-          <tr><td colSpan={columns.length} className="muted" style={{ textAlign: 'center', padding: 40 }}>{empty}</td></tr>
+          <tr><td colSpan={columns.length + (comparing ? 2 : 0)} className="muted" style={{ textAlign: 'center', padding: 40 }}>{empty}</td></tr>
         )}
       </tbody>
     </table>
   );
+}
+
+function buildHistoryRows(snapshot, tab) {
+  if (tab === 'injection') return buildInjectionRows(snapshot);
+  if (tab === 'ink') return buildInkPlanRows(snapshot);
+  return buildInventoryRows(snapshot);
 }
 
 function summarizeSnapshot(s) {
@@ -214,6 +317,7 @@ function buildInkPlanRows(s) {
     for (const [day, values] of Object.entries(ink.days || {})) {
       const entries = Object.entries(values || {})
         .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .sort(([a], [b]) => String(a).localeCompare(String(b)))
         .map(([k, v]) => `${k}: ${v}`);
       if (entries.length) out.push({ name: ink.name, day, values: entries.join(' / ') });
     }

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-01T07:25:00.000Z",
+  "lastUpdated": "2026-06-15T01:35:00.000Z",
   "activeFeatures": ["r3-dedup-unification"],
   "primaryFeature": "r3-dedup-unification",
   "features": {
@@ -20,6 +20,17 @@
       "analysis": "docs/03-analysis/r3-dedup-unification.analysis.md",
       "report": "docs/04-report/r3-dedup-unification.report.md",
       "tests": { "js": 99, "python": 19 }
+    },
+    "history-snapshot-diff": {
+      "phase": "completed",
+      "matchRate": 100,
+      "qaStatus": "PASS",
+      "plan": "docs/01-plan/features/history-snapshot-diff.plan.md",
+      "design": "docs/02-design/features/history-snapshot-diff.design.md",
+      "analysis": "docs/03-analysis/history-snapshot-diff.analysis.md",
+      "qa": "docs/05-qa/history-snapshot-diff.qa-report.md",
+      "report": "docs/04-report/history-snapshot-diff.report.md",
+      "tests": { "js": 176, "python": 67 }
     }
   },
   "pipeline": {
@@ -41,6 +52,11 @@
     {
       "feature": "r3-dedup-unification",
       "completedAt": "2026-06-01T07:25:00.000Z",
+      "matchRate": 100
+    },
+    {
+      "feature": "history-snapshot-diff",
+      "completedAt": "2026-06-15T01:35:00.000Z",
       "matchRate": 100
     }
   ]

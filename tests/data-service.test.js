@@ -791,3 +791,99 @@ test('resolveConcurrentEdit: base/local/server null-safe', () => {
   assert.equal(r.status, 'merged');
   assert.deepEqual(r.data.products, [1]);
 });
+
+// History snapshot diff
+const compareHistory = (base, current) => DataService.compareHistoryRows(
+  base,
+  current,
+  ['floor', 'machine', 'day', 'shift'],
+  ['value'],
+);
+
+test('compareHistoryRows: identical rows are unchanged', () => {
+  const row = { floor: '3F', machine: '1', day: 'Mon', shift: 'day', value: 'P1' };
+  const result = compareHistory([row], [{ ...row }]);
+  assert.equal(result.rows[0]._change, 'unchanged');
+  assert.deepEqual(result.summary, { added: 0, changed: 0, removed: 0, unchanged: 1, totalChanges: 0 });
+});
+
+test('compareHistoryRows: current-only rows are added', () => {
+  const row = { floor: '3F', machine: '1', day: 'Mon', shift: 'day', value: 'P1' };
+  const result = compareHistory([], [row]);
+  assert.equal(result.rows[0]._change, 'added');
+  assert.equal(result.summary.added, 1);
+  assert.equal(result.rows[0]._changeDetail, '현재 데이터에 추가');
+});
+
+test('compareHistoryRows: backup-only rows are removed', () => {
+  const row = { floor: '3F', machine: '1', day: 'Mon', shift: 'day', value: 'P1' };
+  const result = compareHistory([row], []);
+  assert.equal(result.rows[0]._change, 'removed');
+  assert.equal(result.summary.removed, 1);
+  assert.deepEqual(result.rows[0]._before, row);
+});
+
+test('compareHistoryRows: changed values preserve before and after', () => {
+  const before = { floor: '3F', machine: '1', day: 'Mon', shift: 'day', value: 'P1' };
+  const after = { ...before, value: 'P2' };
+  const result = compareHistory([before], [after]);
+  assert.equal(result.rows[0]._change, 'changed');
+  assert.equal(result.rows[0]._changeDetail, 'P1 -> P2');
+  assert.equal(result.rows[0]._before.value, 'P1');
+  assert.equal(result.rows[0]._after.value, 'P2');
+});
+
+test('compareHistoryRows: input order and null inputs are safe', () => {
+  const a = { floor: '3F', machine: '1', day: 'Mon', shift: 'day', value: 'P1' };
+  const b = { floor: '1F', machine: '2', day: 'Tue', shift: 'night', value: 'P2' };
+  const result = compareHistory([a, b], [b, a]);
+  assert.equal(result.summary.unchanged, 2);
+  assert.deepEqual(DataService.compareHistoryRows(null, undefined, ['id'], ['value']), {
+    rows: [],
+    summary: { added: 0, changed: 0, removed: 0, unchanged: 0, totalChanges: 0 },
+  });
+});
+
+// ── 변경 감사 로그(audit-trail) 표시 헬퍼 ───────────────────────────────────
+
+test('parseAuditField parses injection field into floor/machine + day/shift', () => {
+  assert.deepEqual(DataService.parseAuditField('injection·3층·10호기·월·day'), {
+    kind: 'injection',
+    kindLabel: '사출계획',
+    target: '3층 10호기',
+    detail: '월/주간',
+  });
+});
+
+test('parseAuditField labels products and machineAssignments', () => {
+  assert.equal(DataService.parseAuditField('products·PIA블루').kindLabel, '제품 마스터');
+  assert.equal(DataService.parseAuditField('products·PIA블루').target, 'PIA블루');
+  assert.equal(DataService.parseAuditField('machineAssignments·i1').kindLabel, '잉크 배정');
+});
+
+test('auditChangeKind distinguishes added / removed / changed', () => {
+  assert.equal(DataService.auditChangeKind('', 'X'), 'added');
+  assert.equal(DataService.auditChangeKind(null, 'X'), 'added');
+  assert.equal(DataService.auditChangeKind('X', ''), 'removed');
+  assert.equal(DataService.auditChangeKind('X', null), 'removed');
+  assert.equal(DataService.auditChangeKind('X', 'Y'), 'changed');
+});
+
+test('summarizeAuditEntries counts by kind and source', () => {
+  const entries = [
+    { field: 'injection·3층·10호기·월·day', source: 'injection' },
+    { field: 'injection·3층·11호기·월·day', source: 'injection' },
+    { field: 'products·A', source: 'products' },
+    { field: 'machineAssignments·i1', source: 'machines' },
+  ];
+  const s = DataService.summarizeAuditEntries(entries);
+  assert.equal(s.total, 4);
+  assert.equal(s.byKind.injection, 2);
+  assert.equal(s.byKind.products, 1);
+  assert.equal(s.byKind.machineAssignments, 1);
+  assert.equal(s.bySource.injection, 2);
+});
+
+test('summarizeAuditEntries is null-safe', () => {
+  assert.deepEqual(DataService.summarizeAuditEntries(null), { total: 0, byKind: {}, bySource: {} });
+});
