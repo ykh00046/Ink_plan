@@ -35,6 +35,24 @@ test('productIdNum/allocateProductId: 순번 id 파싱·부여', () => {
   assert.equal(DataService.allocateProductId([{ id: 'p_00001' }, { id: 'p_00007' }, { name: 'x' }]), 'p_00008');
 });
 
+test('사출 참조 cell-tolerant: 동명 object 셀을 id로 정밀 매칭(count/rename/lineup)', () => {
+  const injection = { '3층': [{ machine: '10호기', schedule: {
+    // 같은 이름 'AFF' 두 제품(p_1·p_2)을 각 셀이 id로 가리킴
+    월: { day: { name: 'AFF', id: 'p_2' }, night: { name: 'AFF', id: 'p_1' } },
+  } }] };
+  // id 주면 그 제품 셀만, 없으면 이름으로 둘 다
+  assert.equal(DataService.countInjectionRefs({ injection }, 'AFF', 'p_2'), 1);
+  assert.equal(DataService.countInjectionRefs({ injection }, 'AFF'), 2);
+  // rename: p_2 셀만 name 교체(id 유지), p_1 셀은 그대로
+  const renamed = DataService.renameInjectionRefs(injection, 'AFF', 'NEW', 'p_2');
+  assert.deepEqual(renamed['3층'][0].schedule['월'].day, { name: 'NEW', id: 'p_2' });
+  assert.deepEqual(renamed['3층'][0].schedule['월'].night, { name: 'AFF', id: 'p_1' });
+  // lineup: object 셀도 이름으로 표시([object Object] 방지)
+  const lineup = DataService.buildTodayLineup(injection, '월');
+  assert.equal(lineup[0].day, 'AFF');
+  assert.equal(lineup[0].night, 'AFF');
+});
+
 test('resolveProductById / 셀 헬퍼: id 우선, 레거시 문자열 폴백, 동명 정확', () => {
   // 같은 이름 분말/액상을 id로 구분
   const products = [

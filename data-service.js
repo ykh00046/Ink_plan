@@ -59,8 +59,20 @@
     };
   }
 
-  function renameInjectionRefs(injection, oldName, newName) {
-    if (!oldName || oldName === newName) return injection;
+  // 셀(문자열/{name,id})이 대상 제품을 가리키는지 — id 주면 id-정밀(동명 구분), 없으면 이름.
+  function cellRefsProduct(cell, name, id) {
+    if (cell && typeof cell === 'object') {
+      return id != null ? cell.id === id : productCellName(cell) === name;
+    }
+    return cell === name;
+  }
+  // 셀 이름 변경 — 객체 셀은 id 유지하고 name만, 문자열 셀은 교체.
+  function renameCell(cell, newName) {
+    return (cell && typeof cell === 'object') ? { ...cell, name: newName } : newName;
+  }
+
+  function renameInjectionRefs(injection, oldName, newName, id) {
+    if ((!oldName && id == null) || oldName === newName) return injection;
     const next = {};
     for (const floor of Object.keys(injection || {})) {
       next[floor] = (injection[floor] || []).map(machine => ({
@@ -70,8 +82,8 @@
             day,
             {
               ...shifts,
-              day: shifts.day === oldName ? newName : shifts.day,
-              night: shifts.night === oldName ? newName : shifts.night,
+              day: cellRefsProduct(shifts.day, oldName, id) ? renameCell(shifts.day, newName) : shifts.day,
+              night: cellRefsProduct(shifts.night, oldName, id) ? renameCell(shifts.night, newName) : shifts.night,
             },
           ])
         ),
@@ -80,14 +92,14 @@
     return next;
   }
 
-  function countInjectionRefs(data, productName) {
-    if (!productName || !data?.injection) return 0;
+  function countInjectionRefs(data, productName, id) {
+    if ((!productName && id == null) || !data?.injection) return 0;
     let count = 0;
     for (const floor of Object.keys(data.injection)) {
       for (const machine of data.injection[floor] || []) {
         for (const shifts of Object.values(machine.schedule || {})) {
-          if (shifts.day === productName) count++;
-          if (shifts.night === productName) count++;
+          if (cellRefsProduct(shifts.day, productName, id)) count++;
+          if (cellRefsProduct(shifts.night, productName, id)) count++;
         }
       }
     }
@@ -1409,8 +1421,8 @@
     for (const floor of Object.keys(injection || {})) {
       for (const m of injection[floor] || []) {
         const cell = (m.schedule || {})[todayKor] || {};
-        const day = String(cell.day || '').trim();
-        const night = String(cell.night || '').trim();
+        const day = productCellName(cell.day).trim();
+        const night = productCellName(cell.night).trim();
         if (!day && !night) continue;
         const no = machineNoOf(m);
         rows.push({

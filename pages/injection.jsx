@@ -42,9 +42,13 @@ function InjectionPage({ ctx }) {
     return { testInkNames, testProducts, productInks };
   }, [data.testInks, data.products]);
 
+  // 셀은 레거시 문자열 또는 {name, id} 객체 — 표시·판정은 이름으로.
+  const cellName = (v) => DataService.productCellName(v);
+
   const isTestValue = (v) => {
-    if (!v) return false;
-    const lv = v.toLowerCase();
+    const s = cellName(v);
+    if (!s) return false;
+    const lv = s.toLowerCase();
     if (lv === 'test' || lv.includes('test')) return true;
     if (testSets.testInkNames.has(lv)) return true;
     if (testSets.testProducts.has(lv)) return true;
@@ -55,7 +59,15 @@ function InjectionPage({ ctx }) {
 
   // 마스터 lookup (이름 → 제품) — DataService 단일 로직에 위임 (ink-plan과 동일)
   const productLookup = useMemo(() => DataService.buildProductLookup(data.products), [data.products]);
-  const resolveProduct = (value) => DataService.resolveProductIn(productLookup, value);
+  // 셀(문자열/객체) → 제품: id 있으면 정확, 없으면 이름 해소
+  const resolveProduct = (value) => DataService.resolveProductCell(productLookup, value);
+
+  // 수동 편집 저장값을 셀로 — 동명 아닌 이름은 {name, id}로 캡처, 그 외엔 문자열 유지
+  const toCellValue = (value) => {
+    if (!value || typeof value !== 'string' || isTestValue(value)) return value;
+    const matches = (data.products || []).filter(p => p.name === value);
+    return (matches.length === 1 && matches[0].id) ? { name: value, id: matches[0].id } : value;
+  };
 
   // 셀 상태: 'ok' | 'new' | 'unregistered' | 'no-inks'
   const cellStatus = (value) => {
@@ -113,7 +125,7 @@ function InjectionPage({ ctx }) {
     return machines.filter(m => {
       if (m.machine.toLowerCase().includes(q)) return true;
       for (const d of Object.values(m.schedule)) {
-        if ((d.day || '').toLowerCase().includes(q) || (d.night || '').toLowerCase().includes(q)) return true;
+        if (cellName(d.day).toLowerCase().includes(q) || cellName(d.night).toLowerCase().includes(q)) return true;
       }
       return false;
     });
@@ -127,7 +139,7 @@ function InjectionPage({ ctx }) {
     const list = [...(newData.injection[fl] || [])];
     const realIdx = list.findIndex(x => x.machine === machine.machine);
     if (realIdx < 0) return;
-    list[realIdx] = { ...list[realIdx], schedule: { ...list[realIdx].schedule, [day]: { ...list[realIdx].schedule[day], [shift]: value } } };
+    list[realIdx] = { ...list[realIdx], schedule: { ...list[realIdx].schedule, [day]: { ...list[realIdx].schedule[day], [shift]: toCellValue(value) } } };
     newData.injection = { ...newData.injection, [fl]: list };
     setData(newData);
   };
@@ -153,7 +165,7 @@ function InjectionPage({ ctx }) {
     updateCell(srcMachine, dragging.day, dragging.shift, '');
     updateCell(tgtMachine, target.day, target.shift, value);
     setData(newData);
-    notify(`${value} → ${tgtMachine.machine} ${target.day} ${target.shift === 'day' ? '주간' : '야간'}`);
+    notify(`${cellName(value)} → ${tgtMachine.machine} ${target.day} ${target.shift === 'day' ? '주간' : '야간'}`);
     setDragging(null);
     setDragOver(null);
   };
@@ -167,14 +179,15 @@ function InjectionPage({ ctx }) {
         for (const [d, sh] of Object.entries(m.schedule || {})) {
           for (const sk of DataService.SHIFTS) {
             const v = sh[sk];
-            if (!v || isTestValue(v)) continue;
+            const name = cellName(v);
+            if (!name || isTestValue(v)) continue;
             const p = resolveProduct(v);
             if (!p) {
-              if (!unregistered.has(v)) unregistered.set(v, []);
-              unregistered.get(v).push({ fl, machine: m.machine, d, sk });
+              if (!unregistered.has(name)) unregistered.set(name, []);
+              unregistered.get(name).push({ fl, machine: m.machine, d, sk });
             } else if (!(p.inks || []).filter(Boolean).length) {
-              if (!noInks.has(v)) noInks.set(v, []);
-              noInks.get(v).push({ fl, machine: m.machine, d, sk });
+              if (!noInks.has(name)) noInks.set(name, []);
+              noInks.get(name).push({ fl, machine: m.machine, d, sk });
             }
           }
         }
@@ -276,7 +289,7 @@ function InjectionPage({ ctx }) {
                         {m.no != null && <span className="injection-machine-no">#{m.no}</span>}
                       </td>
                       {columns.map(col => {
-                        const value = m.schedule[col.day]?.[col.shift] || '';
+                        const value = cellName(m.schedule[col.day]?.[col.shift]);
                         const isTest = isTestValue(value);
                         const isDragOver = dragOver && dragOver.mi === realMi && dragOver.day === col.day && dragOver.shift === col.shift;
                         const isDragging = dragging && dragging.mi === realMi && dragging.day === col.day && dragging.shift === col.shift;

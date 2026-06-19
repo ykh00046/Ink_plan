@@ -111,7 +111,7 @@ function ProductsPage({ ctx }) {
       }
       newData.products = [...newData.products];
       newData.products[idx] = normalized;
-      newData.injection = DataService.renameInjectionRefs(data.injection, oldName, normalized.name);
+      newData.injection = DataService.renameInjectionRefs(data.injection, oldName, normalized.name, editing.product.id);
       notify('제품이 수정되었습니다');
     }
     setData(newData);
@@ -119,7 +119,7 @@ function ProductsPage({ ctx }) {
   };
 
   const handleDelete = (product) => {
-    const refCount = DataService.countInjectionRefs(data, product.name);
+    const refCount = DataService.countInjectionRefs(data, product.name, product.id);
     if (refCount > 0) {
       notify(`사출계획에서 ${refCount}칸이 '${product.name}'을 사용 중이라 삭제할 수 없습니다`);
       setConfirmDelete(null);

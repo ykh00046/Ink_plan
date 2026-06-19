@@ -27,13 +27,8 @@ function InkAddPage({ ctx }) {
   }, [targetCells]);
 
   // 제품명 → 잉크 배열 lookup
-  const productInks = useMemo(() => {
-    const m = new Map();
-    for (const p of data.products) {
-      m.set(p.name, (p.inks || []).filter(Boolean));
-    }
-    return m;
-  }, [data.products]);
+  // 셀(문자열/{name,id})을 id-정밀 해소 — 동명 액상/분말도 정확한 잉크
+  const productLookup = useMemo(() => DataService.buildProductLookup(data.products), [data.products]);
 
   // 사출계획 자동 집계: 잉크명 → { f3, f1 }
   // 범위 = 오늘 주/야 + 내일 주 (targetCells)
@@ -43,10 +38,10 @@ function InkAddPage({ ctx }) {
       const isF3 = fl === '3층';
       for (const m of data.injection[fl]) {
         for (const { day, shift } of targetCells) {
-          const product = m.schedule?.[day]?.[shift];
+          const product = DataService.resolveProductCell(productLookup, m.schedule?.[day]?.[shift]);
           if (!product) continue;
-          const inks = productInks.get(product);
-          if (!inks || inks.length === 0) continue;
+          const inks = (product.inks || []).filter(Boolean);
+          if (inks.length === 0) continue;
           for (const ink of inks) {
             if (!map.has(ink)) map.set(ink, { name: ink, f3: 0, f1: 0 });
             const entry = map.get(ink);
@@ -57,7 +52,7 @@ function InkAddPage({ ctx }) {
       }
     }
     return Array.from(map.values()).map(e => ({ ...e, total: e.f3 + e.f1 }));
-  }, [data.injection, productInks, targetCells]);
+  }, [data.injection, productLookup, targetCells]);
 
   const filtered = useMemo(() => {
     let list = inkAdd;

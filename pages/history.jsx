@@ -303,8 +303,9 @@ function buildInjectionRows(s) {
   for (const [floor, list] of Object.entries(s?.injection || {})) {
     for (const machine of list || []) {
       for (const [day, shifts] of Object.entries(machine.schedule || {})) {
-        if (shifts.day) out.push({ floor, machine: machine.machine, day, shift: '주간', value: shifts.day });
-        if (shifts.night) out.push({ floor, machine: machine.machine, day, shift: '야간', value: shifts.night });
+        // 셀이 {name,id} 객체일 수 있음 — diff·표시는 이름 기준(객체↔문자열 노이즈 방지)
+        if (shifts.day) out.push({ floor, machine: machine.machine, day, shift: '주간', value: DataService.productCellName(shifts.day) });
+        if (shifts.night) out.push({ floor, machine: machine.machine, day, shift: '야간', value: DataService.productCellName(shifts.night) });
       }
     }
   }
