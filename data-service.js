@@ -755,22 +755,12 @@
   // ── 공유 normalize 헬퍼 (ui.jsx 에서 위임) ──────────────────────────────────
 
   // 제품명 정규화 (OCR ↔ master 비교용): NFC + 대문자 + 공백/특수문자 제거
-  // '액상'은 제형(type) 표기일 뿐 제품명의 일부가 아니라 base 키에서 제거한다.
-  // 마스터 이름엔 '액상'이 없고(제형은 type 필드), 사출계획은 "… (액상)"으로 표기 →
-  // base를 맞춘 뒤 제형 선택은 resolveProductIn(formOfProductName)에서 따로 한다.
   function normalizeProductName(name) {
     if (!name) return '';
     let s = String(name).normalize('NFC').trim().toUpperCase();
     s = s.replace(/[_\-\s/\\()（）\[\]【】·・.,，]+/g, '');
     s = s.replace(/[^\w가-힣%]/g, '');
-    s = s.replace(/액상/g, '');
     return s;
-  }
-
-  // 사출계획/요청서 제품 표기에서 제형 신호 추출 — '(액상)'·'/ 액상' 있으면 LIQUID, 없으면 POWDER.
-  // 마스터의 제품.type(POWDER/LIQUID)과 맞춰 같은 이름의 분말/액상 제품을 구분한다.
-  function formOfProductName(name) {
-    return /액상/.test(String(name || '')) ? 'LIQUID' : 'POWDER';
   }
 
   // OCR brand "PIA / 액상" → "PIA" (슬래시 앞부분, 대문자)
@@ -834,34 +824,19 @@
   function buildProductLookup(products) {
     const exact = new Map();
     const normalized = new Map();
-    const byBase = new Map();   // base 키 → 같은 이름의 모든 제형 후보 [product, …]
     for (const p of products || []) {
       if (p.name) exact.set(p.name, p);
       const key = normalizeProductName(p.name);
-      if (!key) continue;
-      if (!normalized.has(key)) normalized.set(key, p);
-      if (!byBase.has(key)) byBase.set(key, []);
-      byBase.get(key).push(p);
+      if (key && !normalized.has(key)) normalized.set(key, p);
     }
-    return { exact, normalized, byBase };
+    return { exact, normalized };
   }
 
-  // base 이름 + 제형(액상/분말)으로 제품 1건 해소.
-  //  · 후보 1건 → 그대로(99% 경로)
-  //  · 후보 여러 건(같은 이름의 분말/액상 등) → 제형 일치 우선, 그다음 정확 이름, 그다음 첫 후보
   function resolveProductIn(lookup, name) {
     if (!name) return null;
-    const base = normalizeProductName(name);
-    const candidates = (lookup.byBase && lookup.byBase.get(base)) || null;
-    if (candidates && candidates.length) {
-      if (candidates.length === 1) return candidates[0];
-      const wantType = formOfProductName(name);
-      const byType = candidates.filter(p => (p.type || 'POWDER') === wantType);
-      const pool = byType.length ? byType : candidates;
-      return pool.find(p => p.name === name) || pool[0];
-    }
-    // base 후보가 없으면 정확 이름만 마지막으로 시도(정규화 충돌 회피)
-    return lookup.exact.get(name) || null;
+    return lookup.exact.get(name)
+      || lookup.normalized.get(normalizeProductName(name))
+      || null;
   }
 
   // 제품 마스터에서 브랜드 옵션(빈값 제외·중복 제거·정렬) — injection/products 공용
@@ -1723,7 +1698,6 @@
     summarizeAuditEntries,
     // 공유 normalize 헬퍼
     normalizeProductName,
-    formOfProductName,
     normalizeBrand,
     dayFromDate,
     getWeekInfo,
