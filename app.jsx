@@ -37,6 +37,12 @@ function migrateData(raw) {
       inks: padInks3(e._inks),
     }));
   }
+  // 제품 정체성 id: 없는 제품에 안정적 고유 id(p_NNNNN) 1회 부여 후 영속.
+  // 이름이 같은 제품(액상/분말·동명 다른제품)을 끝까지 정확히 가리키는 단일 키.
+  // 순번 기반(랜덤 아님)이라 재현 가능하고, 기존 id는 보존 → 재실행 안정.
+  let maxId = nextProducts.reduce((mx, p) => Math.max(mx, DataService.productIdNum(p.id)), 0);
+  nextProducts = nextProducts.map(p => (p.id ? p : { ...p, id: `p_${String(++maxId).padStart(5, '0')}` }));
+
   // machineAssignments: { ink, machine, code } 단일 형태로 정규화 (구버전 product/name 흡수)
   const nextAssignments = (raw.machineAssignments || []).map(a => ({
     ink: a.ink || a.product || a.name || '',

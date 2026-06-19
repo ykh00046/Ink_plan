@@ -821,15 +821,29 @@
 
   // ── ink-plan 파생 엔진 (pages/ink-plan.jsx 에서 이전) ───────────────────────
 
+  // 제품 정체성 id 스킴(p_NNNNN) — 동명 제품(액상/분말·동명 다른제품) 구분의 단일 키.
+  function productIdNum(id) {
+    const m = typeof id === 'string' && id.match(/^p_(\d+)$/);
+    return m ? Number(m[1]) : 0;
+  }
+  // 현재 제품들 중 최대 id+1을 다음 id로 — 순번 기반(랜덤 아님)이라 재현 가능.
+  function allocateProductId(products) {
+    let mx = 0;
+    for (const p of products || []) mx = Math.max(mx, productIdNum(p.id));
+    return `p_${String(mx + 1).padStart(5, '0')}`;
+  }
+
   function buildProductLookup(products) {
     const exact = new Map();
     const normalized = new Map();
+    const byId = new Map();   // id → product (정체성 해소)
     for (const p of products || []) {
       if (p.name) exact.set(p.name, p);
       const key = normalizeProductName(p.name);
       if (key && !normalized.has(key)) normalized.set(key, p);
+      if (p.id) byId.set(p.id, p);
     }
-    return { exact, normalized };
+    return { exact, normalized, byId };
   }
 
   function resolveProductIn(lookup, name) {
@@ -837,6 +851,27 @@
     return lookup.exact.get(name)
       || lookup.normalized.get(normalizeProductName(name))
       || null;
+  }
+
+  // 제품 id로 정확 해소 (동명 충돌 무관)
+  function resolveProductById(lookup, id) {
+    if (!id || !lookup || !lookup.byId) return null;
+    return lookup.byId.get(id) || null;
+  }
+
+  // injection 셀 접근 헬퍼 — 레거시 문자열과 {name, id} 객체를 모두 허용.
+  function productCellName(cell) {
+    if (cell == null) return '';
+    return typeof cell === 'string' ? cell : (cell.name || '');
+  }
+  function productCellId(cell) {
+    return (cell && typeof cell === 'object') ? (cell.id || null) : null;
+  }
+  // 셀 → 제품 해소: id 있으면 id로(정확), 없으면(레거시 문자열) 이름 해소 폴백.
+  function resolveProductCell(lookup, cell) {
+    const id = productCellId(cell);
+    if (id) return resolveProductById(lookup, id) || resolveProductIn(lookup, productCellName(cell));
+    return resolveProductIn(lookup, productCellName(cell));
   }
 
   // 제품 마스터에서 브랜드 옵션(빈값 제외·중복 제거·정렬) — injection/products 공용
@@ -852,8 +887,8 @@
     for (const floor of Object.keys(injection || {})) {
       for (const m of injection[floor]) {
         for (const sh of Object.values(m.schedule || {})) {
-          for (const productName of [sh.day, sh.night]) {
-            const product = resolveProductIn(productLookup, productName);
+          for (const cell of [sh.day, sh.night]) {
+            const product = resolveProductCell(productLookup, cell);
             if (!product) continue;
             for (const ink of (product.inks || [])) {
               if (!ink) continue;
@@ -873,8 +908,8 @@
     for (const floor of Object.keys(injection || {})) {
       for (const m of injection[floor] || []) {
         for (const [day, shifts] of Object.entries(m.schedule || {})) {
-          for (const productName of [shifts.day, shifts.night]) {
-            const product = resolveProductIn(productLookup, productName);
+          for (const cell of [shifts.day, shifts.night]) {
+            const product = resolveProductCell(productLookup, cell);
             if (!product) continue;
             for (const ink of (product.inks || [])) {
               if (!ink) continue;
@@ -1705,6 +1740,12 @@
     // ink-plan 파생 엔진
     buildProductLookup,
     resolveProductIn,
+    resolveProductById,
+    resolveProductCell,
+    productCellName,
+    productCellId,
+    productIdNum,
+    allocateProductId,
     buildBrandOptions,
     buildProductsUsingInk,
     buildDemandByInkDay,

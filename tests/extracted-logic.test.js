@@ -25,6 +25,37 @@ test('resolveProductIn: exact 우선, 없으면 normalized, 둘 다 없으면 nu
   assert.equal(DataService.resolveProductIn(lookup, ''), null);
 });
 
+// ── 제품 정체성 id (P0): 동명 제품 구분의 단일 키 ─────────────────────────────
+test('productIdNum/allocateProductId: 순번 id 파싱·부여', () => {
+  assert.equal(DataService.productIdNum('p_00042'), 42);
+  assert.equal(DataService.productIdNum('nope'), 0);
+  assert.equal(DataService.productIdNum(undefined), 0);
+  assert.equal(DataService.allocateProductId([]), 'p_00001');
+  // 최대 id+1 (id 없는 행은 0 취급)
+  assert.equal(DataService.allocateProductId([{ id: 'p_00001' }, { id: 'p_00007' }, { name: 'x' }]), 'p_00008');
+});
+
+test('resolveProductById / 셀 헬퍼: id 우선, 레거시 문자열 폴백, 동명 정확', () => {
+  // 같은 이름 분말/액상을 id로 구분
+  const products = [
+    { id: 'p_1', name: 'D_Affogato_55% UV', inks: ['AFFO'] },
+    { id: 'p_2', name: 'D_Affogato_55% UV', inks: ['CONVEX'] },
+  ];
+  const lookup = DataService.buildProductLookup(products);
+  assert.equal(DataService.resolveProductById(lookup, 'p_2').inks[0], 'CONVEX');
+  assert.equal(DataService.resolveProductById(lookup, '없음'), null);
+  // 셀 헬퍼: 문자열/객체 양쪽
+  assert.equal(DataService.productCellName('이름'), '이름');
+  assert.equal(DataService.productCellName({ name: '이름', id: 'p_1' }), '이름');
+  assert.equal(DataService.productCellName(null), '');
+  assert.equal(DataService.productCellId({ name: '이름', id: 'p_1' }), 'p_1');
+  assert.equal(DataService.productCellId('이름'), null);
+  // resolveProductCell: 객체 셀 → id로 정확 해소
+  assert.equal(DataService.resolveProductCell(lookup, { name: 'D_Affogato_55% UV', id: 'p_2' }).inks[0], 'CONVEX');
+  // 레거시 문자열 → 이름 해소(동명은 모호 — 후보 중 하나, 바로 이 모호함을 id가 제거)
+  assert.ok(['AFFO', 'CONVEX'].includes(DataService.resolveProductCell(lookup, 'D_Affogato_55% UV').inks[0]));
+});
+
 test('buildBrandOptions: 빈값 제외·중복 제거·정렬 (injection/products 공용)', () => {
   const products = [
     { name: 'A', brand: '병' },
