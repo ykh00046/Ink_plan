@@ -1091,24 +1091,49 @@
     const normName = normalizeProductName(r.product_name);
     const normCustomer = normalizeBrand(r.brand);
     const sameName = masterIndex.products.filter(p => normalizeProductName(p.name) === normName);
-    const exactProduct = (normName && normCustomer)
-      ? sameName.find(p => normalizeBrand(p.customer || p.brand) === normCustomer)
-      : null;
-
-    if (exactProduct) {
-      return { isTest: false, status: 'exact', matchedName: exactProduct.name, confidence: 1, candidates: [] };
+    if (sameName.length === 0) {
+      return { isTest: false, status: 'none', matchedName: null, matchedId: null, confidence: 0, candidates: [] };
     }
-    if (sameName.length === 1) {
+
+    // 1) brand로 좁히기  2) 제형(variant '액상'→type LIQUID)으로 좁히기
+    const brandMatches = normCustomer
+      ? sameName.filter(p => normalizeBrand(p.customer || p.brand) === normCustomer)
+      : [];
+    const brandOk = brandMatches.length > 0;
+    let pool = brandOk ? brandMatches : sameName;
+    const wantType = (/액상/.test(String(r.variant || '')) || /액상/.test(String(r.brand || '')))
+      ? 'LIQUID' : 'POWDER';
+    const formPool = pool.filter(p => (p.type || 'POWDER') === wantType);
+    if (formPool.length) pool = formPool;
+
+    if (pool.length === 1) {
+      const p = pool[0];
       return {
         isTest: false,
-        status: 'brand-mismatch',
-        matchedName: sameName[0].name,
-        confidence: 0.8,
-        candidates: sameName,
-        suggestedBrand: sameName[0].customer || sameName[0].brand || '',
+        status: brandOk ? 'exact' : 'brand-mismatch',
+        matchedName: p.name,
+        matchedId: p.id || null,
+        confidence: brandOk ? 1 : 0.8,
+        candidates: brandOk ? [] : sameName,
+        suggestedBrand: brandOk ? undefined : (p.customer || p.brand || ''),
       };
     }
-    return { isTest: false, status: 'none', matchedName: null, confidence: 0, candidates: sameName };
+
+    // 동명 후보 2+ — 사용자가 검수에서 선택 (제형까지 같은 U-buding류는 잉크로 구분)
+    return {
+      isTest: false,
+      status: 'ambiguous',
+      matchedName: null,
+      matchedId: null,
+      confidence: 0,
+      candidates: pool.map(p => ({
+        id: p.id || null,
+        name: p.name,
+        type: p.type || 'POWDER',
+        brand: p.brand || p.customer || '',
+        inks: (p.inks || []).filter(Boolean),
+      })),
+    };
   }
 
   // OCR parsed → 행 flat 리스트
@@ -1150,9 +1175,11 @@
       if (row.status === 'exact' && group.status !== 'exact') {
         group.status = row.status;
         group.matchedName = row.matchedName;
+        group.matchedId = row.matchedId;
       } else if (row.status === 'brand-mismatch' && group.status === 'none') {
         group.status = row.status;
         group.matchedName = row.matchedName;
+        group.matchedId = row.matchedId;
         group.suggestedBrand = row.suggestedBrand;
       }
     }
@@ -1229,6 +1256,18 @@
       }));
     }
 
+    // 이름 → 유일 id (동명 아닌 제품은 자동으로 id 캡처). 동명은 decision.targetId 필요.
+    const uniqueIdByName = new Map();
+    {
+      const byName = new Map();
+      for (const p of data.products || []) {
+        if (!p.name) continue;
+        if (!byName.has(p.name)) byName.set(p.name, []);
+        byName.get(p.name).push(p);
+      }
+      for (const [n, arr] of byName) if (arr.length === 1 && arr[0].id) uniqueIdByName.set(n, arr[0].id);
+    }
+
     const mergedByShift = { '주간': 0, '야간': 0, '명일주간': 0 };
     let skippedNoMachine = 0;
     let skippedNoMatch = 0;
@@ -1248,6 +1287,9 @@
 
         const productName = decision.target || r.product_name;
         if (!productName) continue;
+        // 정체성 id: 선택된 targetId 우선, 없으면 동명 아닌 제품은 이름으로 자동 캡처.
+        const cellId = decision.targetId || uniqueIdByName.get(productName) || null;
+        const cellValue = cellId ? { name: productName, id: cellId } : productName;
 
         const targetFloors = floorMap[r.floor]
           ? [floorMap[r.floor]]
@@ -1258,7 +1300,7 @@
           const machine = list.find(m => machineNoOf(m) === r.machine_no);
           if (!machine) continue;
           if (!machine.schedule[targetDay]) machine.schedule[targetDay] = { day: '', night: '' };
-          machine.schedule[targetDay][shiftKey] = productName;
+          machine.schedule[targetDay][shiftKey] = cellValue;
           mergedByShift[sheet.shift] = (mergedByShift[sheet.shift] || 0) + 1;
           found = true;
           break;

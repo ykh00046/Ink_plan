@@ -293,10 +293,60 @@ test('matchOcrRow: 이름 1건이지만 브랜드 불일치 → brand-mismatch',
   assert.equal(r.suggestedBrand, '고객사');
 });
 
-test('matchOcrRow: 동명 제품 여러 건 → none(candidates 제공)', () => {
+test('matchOcrRow: 동명 제품 여러 건(브랜드·제형으로 못 좁힘) → ambiguous(candidates)', () => {
   const r = DataService.matchOcrRow({ product_name: 'B-200', brand: '병' }, MASTER);
-  assert.equal(r.status, 'none');
+  assert.equal(r.status, 'ambiguous');
   assert.equal(r.candidates.length, 2);
+});
+
+// 제형(variant '액상')으로 동명 분말/액상 자동 좁히기 + matchedId
+test('matchOcrRow: variant 액상 → 동명 분말/액상 중 LIQUID로 자동 해소(matchedId)', () => {
+  const M = { products: [
+    { id: 'p_1', name: 'AFF', customer: 'PIA', type: 'POWDER', inks: ['A'] },
+    { id: 'p_2', name: 'AFF', customer: 'PIA', type: 'LIQUID', inks: ['B'] },
+  ] };
+  const liquid = DataService.matchOcrRow({ product_name: 'AFF', brand: 'PIA', variant: '액상' }, M);
+  assert.equal(liquid.status, 'exact');
+  assert.equal(liquid.matchedId, 'p_2');
+  const powder = DataService.matchOcrRow({ product_name: 'AFF', brand: 'PIA', variant: '' }, M);
+  assert.equal(powder.matchedId, 'p_1');
+});
+
+// 이름·제형까지 같고 잉크만 다른 경우(U-buding류) → ambiguous, 잉크로 구분
+test('matchOcrRow: 동명·동제형·다른잉크 → ambiguous(candidates에 inks)', () => {
+  const M = { products: [
+    { id: 'p_1', name: 'UB', customer: 'X', type: 'POWDER', inks: ['TICO'] },
+    { id: 'p_2', name: 'UB', customer: 'X', type: 'POWDER', inks: ['GRAMPUS'] },
+  ] };
+  const r = DataService.matchOcrRow({ product_name: 'UB', brand: 'X' }, M);
+  assert.equal(r.status, 'ambiguous');
+  assert.deepEqual(r.candidates.map(c => c.id).sort(), ['p_1', 'p_2']);
+  assert.deepEqual(r.candidates.map(c => c.inks[0]).sort(), ['GRAMPUS', 'TICO']);
+});
+
+test('applyOcrToInjection: 확정 셀에 {name,id} 저장 (동명=targetId, 단일=자동 id)', () => {
+  const data = {
+    products: [
+      { id: 'p_1', name: 'AFF', type: 'POWDER', inks: ['A'] },
+      { id: 'p_2', name: 'AFF', type: 'LIQUID', inks: ['B'] },
+      { id: 'p_9', name: 'SOLO', type: 'POWDER', inks: ['C'] },
+    ],
+    injection: { '3층': [{ machine: '10호기', schedule: {} }, { machine: '11호기', schedule: {} }] },
+  };
+  const ocrResult = { parsed: {
+    request_date: '2026-06-15', next_date: '2026-06-16', // 월
+    shifts: [{ shift: '주간', rows: [
+      { machine_no: 10, floor: '3F', brand: 'PIA', variant: '액상', product_name: 'AFF' },
+      { machine_no: 11, floor: '3F', brand: '', variant: '', product_name: 'SOLO' },
+    ] }],
+  } };
+  const decisions = {
+    '주간-10-0': { action: 'match', target: 'AFF', targetId: 'p_2' }, // 동명 → 선택 id
+    '주간-11-1': { action: 'auto', target: 'SOLO' },                  // 단일 → 자동 id
+  };
+  const res = DataService.applyOcrToInjection(data, ocrResult, decisions);
+  assert.deepEqual(res.nextData.injection['3층'][0].schedule['월'].day, { name: 'AFF', id: 'p_2' });
+  assert.deepEqual(res.nextData.injection['3층'][1].schedule['월'].day, { name: 'SOLO', id: 'p_9' });
 });
 
 test('matchOcrRow: 빈 이름 또는 TEST → skip', () => {

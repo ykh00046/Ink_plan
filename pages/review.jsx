@@ -147,7 +147,7 @@ function OcrLintPanel({ issues }) {
 
 function ReviewTable({
   filteredRows, stats, filter, setFilter, groupDecision, allBrands,
-  onNew, onUndo, onBrandChange, onMachineChange, onProductChange, onFixMaster,
+  onNew, onUndo, onBrandChange, onMachineChange, onProductChange, onFixMaster, onPick,
 }) {
   return (
     <Card flush>
@@ -189,6 +189,7 @@ function ReviewTable({
                 onFixMaster={() => onFixMaster(row)}
                 onMachineChange={(v) => onMachineChange(row, v)}
                 onProductChange={(v) => onProductChange(row, v)}
+                onPick={(cand) => onPick(row, cand)}
               />
             ))}
             {filteredRows.length === 0 && (
@@ -282,7 +283,7 @@ function ReviewPage({ ctx }) {
       for (const r of rows) {
         if (next[r.rowKey]) continue;
         if (r.isTest) next[r.rowKey] = { action: 'skip', reason: 'TEST' };
-        else if (r.status === 'exact') next[r.rowKey] = { action: 'auto', target: r.matchedName };
+        else if (r.status === 'exact') next[r.rowKey] = { action: 'auto', target: r.matchedName, targetId: r.matchedId };
       }
       return next;
     });
@@ -371,7 +372,9 @@ function ReviewPage({ ctx }) {
 
   const addMasterProduct = ({ factory, name, type, brand, inks }) => {
     const cleanInks = padInks3(inks);
+    const newId = DataService.allocateProductId(data.products);
     const newProduct = {
+      id: newId,
       factory: factory || '',
       name,
       type: type || '',
@@ -415,6 +418,7 @@ function ReviewPage({ ctx }) {
     }
 
     setData(nextData);
+    return newId;
   };
 
   const handleNew = (row) => {
@@ -428,11 +432,11 @@ function ReviewPage({ ctx }) {
       notify(`마스터에 없는 잉크: ${unknown.join(', ')} — 잉크 추가 및 관리에서 먼저 등록하세요`);
       return;
     }
-    addMasterProduct({ factory, name, type, brand, inks });
+    const newId = addMasterProduct({ factory, name, type, brand, inks });
     setDecisions(d => {
       const next = { ...d };
       for (const rowKey of newProductDialog.row.rowKeys || [newProductDialog.row.rowKey]) {
-        next[rowKey] = { action: 'new', target: name };
+        next[rowKey] = { action: 'new', target: name, targetId: newId };
       }
       return next;
     });
@@ -473,6 +477,17 @@ function ReviewPage({ ctx }) {
       const n = { ...d };
       for (const rowKey of row.rowKeys || [row.rowKey]) delete n[rowKey];
       return n;
+    });
+  };
+
+  // 동명(ambiguous) 그룹에서 후보 1건 선택 → 그 제품 id를 결정에 고정
+  const pickCandidate = (row, cand) => {
+    setDecisions(d => {
+      const next = { ...d };
+      for (const rowKey of row.rowKeys || [row.rowKey]) {
+        next[rowKey] = { action: 'match', target: cand.name, targetId: cand.id };
+      }
+      return next;
     });
   };
 
@@ -526,6 +541,7 @@ function ReviewPage({ ctx }) {
           onFixMaster={fixMasterBrand}
           onMachineChange={updateGroupMachine}
           onProductChange={updateGroupProduct}
+          onPick={pickCandidate}
         />
       </div>
 
@@ -545,12 +561,14 @@ function ReviewPage({ ctx }) {
 
 // ── 셀 component: 한 행 ──────────────────────────────────────────────────────
 
-function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange, onAcceptBrandSuggestion, onFixMaster, onMachineChange, onProductChange }) {
+function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange, onAcceptBrandSuggestion, onFixMaster, onMachineChange, onProductChange, onPick }) {
   const renderStatus = () => {
     if (row.isTest) return <Pill tone="default">TEST</Pill>;
     if (decision?.action === 'auto') return <Pill tone="ok">자동 일치</Pill>;
+    if (decision?.action === 'match') return <Pill tone="ok">✓ 선택됨</Pill>;
     if (decision?.action === 'new') return <Pill tone="info">✓ 신규 등록</Pill>;
     if (decision?.action === 'skip') return <Pill tone="default">건너뜀</Pill>;
+    if (row.status === 'ambiguous') return <Pill tone="warn">동명 선택</Pill>;
     if (row.status === 'brand-mismatch') return <Pill tone="warn">brand 다름</Pill>;
     if (row.status !== 'exact') return <Pill tone="bad">등록 필요</Pill>;
     return <Pill tone="default">{row.status}</Pill>;
@@ -617,7 +635,28 @@ function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange
             </span>
           </div>
         )}
-        {!row.isTest && !decision && row.status !== 'brand-mismatch' && (
+        {!row.isTest && !decision && row.status === 'ambiguous' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ color: 'var(--warn-700)', fontSize: 12 }}>
+              같은 이름 제품이 {row.candidates.length}개 — 어느 제품인지 선택하세요
+            </span>
+            {(row.candidates || []).map((c, i) => (
+              <button
+                key={c.id || i}
+                className="btn btn--sm"
+                onClick={() => onPick && onPick(c)}
+                title={c.name}
+                style={{ justifyContent: 'flex-start', textAlign: 'left', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}
+              >
+                <strong style={{ color: c.type === 'LIQUID' ? 'var(--brand-700)' : 'var(--ink-700)' }}>
+                  {c.type === 'LIQUID' ? '액상' : '분말'}
+                </strong>
+                {' · '}{(c.inks || []).join('+') || '잉크 없음'}
+              </button>
+            ))}
+          </div>
+        )}
+        {!row.isTest && !decision && row.status === 'none' && (
           <span style={{ color: 'var(--bad-600)', fontSize: 12, fontWeight: 600 }}>
             마스터에 없는 제품입니다. 제품 정보를 등록하세요.
           </span>
