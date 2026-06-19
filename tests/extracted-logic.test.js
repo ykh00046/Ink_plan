@@ -361,9 +361,34 @@ test('inkLifeInfo: 입력 없으면 empty', () => {
 // ── 공유 normalize 위임 (ui.jsx → data-service) ──────────────────────────────
 test('normalize 헬퍼: 단일화된 동작 검증', () => {
   assert.equal(DataService.normalizeProductName(' a-100 '), 'A100');
+  // '액상'은 base 키에서 제거(제형은 별도) → 분말/액상이 같은 base로 묶임
+  assert.equal(
+    DataService.normalizeProductName('D_Affogato_55% UV (액상)'),
+    DataService.normalizeProductName('D_Affogato_55% UV')
+  );
+  assert.equal(DataService.formOfProductName('D_Affogato_55% UV (액상)'), 'LIQUID');
+  assert.equal(DataService.formOfProductName('D_Affogato_55% UV'), 'POWDER');
   assert.equal(DataService.normalizeBrand('갑/을'), '갑'); // 슬래시 앞부분
   assert.equal(DataService.inkOfAssignment({ ink: '빨강' }), '빨강');
   assert.equal(DataService.inkOfAssignment({ product: '파랑' }), '파랑');
+});
+
+// ── form-aware 제품 해소: 같은 이름의 분말/액상이 제형으로 구분돼야 함 ───────────────
+test('resolveProductIn: 분말/액상(type)으로 동일 이름 제품 구분', () => {
+  const products = [
+    { name: 'D_Affogato_55% UV', type: 'POWDER', inks: ['AFFO', 'GATO'] },
+    { name: 'D_Affogato_55% UV', type: 'LIQUID', inks: ['CONVEX', 'ESCAPE'] },
+    { name: 'LATIN', type: 'POWDER', inks: ['BRONZE', 'POTTER'] },
+  ];
+  const lookup = DataService.buildProductLookup(products);
+  // 액상 표기 → LIQUID 제품(다른 잉크)
+  assert.deepEqual(DataService.resolveProductIn(lookup, 'D_Affogato_55% UV (액상)').inks, ['CONVEX', 'ESCAPE']);
+  // 액상 없음 → POWDER 제품
+  assert.deepEqual(DataService.resolveProductIn(lookup, 'D_Affogato_55% UV').inks, ['AFFO', 'GATO']);
+  // 후보 1건이면 제형과 무관하게 그대로
+  assert.equal(DataService.resolveProductIn(lookup, 'LATIN').name, 'LATIN');
+  // 미등록은 null
+  assert.equal(DataService.resolveProductIn(lookup, '없는제품'), null);
 });
 
 // ── inventory: 엑셀 재고 조사표 가져오기 ─────────────────────────────────────────
