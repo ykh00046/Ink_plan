@@ -1047,9 +1047,13 @@
     const mdToDay = {};
     for (const [day, md] of Object.entries(dates)) mdToDay[md] = day;
 
+    // (ink, day)별로 "가장 최근 조사 날짜"의 값만 채택 — daily 는 전체 ISO 날짜를
+    // 무한 누적하므로 M/D만 비교하면 작년 같은 날짜 조사가 이번 주로 오인되고,
+    // 어느 값이 이기는지가 삽입 순서에 좌우된다. 최신 ISO 우선으로 결정적 처리.
+    const chosenDate = new Map();   // inkName → Map<dayKor, dateIso>
     for (const [dateIso, valueMap] of Object.entries(inventory.daily)) {
-      const dt = new Date(dateIso);
-      if (isNaN(dt)) continue;
+      const dt = parseDateLocal(dateIso);
+      if (!dt) continue;
       const md = `${dt.getMonth() + 1}/${dt.getDate()}`;
       const dayKor = mdToDay[md];
       if (!dayKor) continue;
@@ -1061,10 +1065,13 @@
             sum += Number(v); any = true;
           }
         }
-        if (any) {
-          if (!result.has(inkName)) result.set(inkName, new Map());
-          result.get(inkName).set(dayKor, sum);
-        }
+        if (!any) continue;
+        if (!chosenDate.has(inkName)) chosenDate.set(inkName, new Map());
+        const prevDate = chosenDate.get(inkName).get(dayKor);
+        if (prevDate && prevDate >= dateIso) continue;   // 더 최신 조사가 이미 있음
+        chosenDate.get(inkName).set(dayKor, dateIso);
+        if (!result.has(inkName)) result.set(inkName, new Map());
+        result.get(inkName).set(dayKor, sum);
       }
     }
     return result;
@@ -1260,12 +1267,20 @@
   }
 
   // 같은 제품(이름+브랜드)을 한 그룹으로 묶음 — TEST는 행마다 별도 그룹
+  // 제형(액상/분말) 판정 — matchOcrRow 의 wantType 규칙과 동일 출처.
+  function ocrRowForm(row) {
+    return (/액상/.test(String(row.variant || '')) || /액상/.test(String(row.brand || '')))
+      ? 'LIQUID' : 'POWDER';
+  }
+
   function buildProductGroups(rows) {
     const map = new Map();
     for (const row of rows) {
+      // 제형을 키에 포함 — "PIA/액상"과 "PIA/분말"은 normalizeBrand 후 동일("PIA")이라
+      // 한 그룹으로 병합되면 첫 exact 행의 id가 다른 제형 행 셀에도 찍힌다(동명 오적용).
       const key = row.isTest
         ? `TEST:${row.rowKey}`
-        : `${normalizeProductName(row.ocrName)}|${normalizeBrand(row.brand)}`;
+        : `${normalizeProductName(row.ocrName)}|${normalizeBrand(row.brand)}|${ocrRowForm(row)}`;
       if (!map.has(key)) {
         map.set(key, { ...row, groupKey: key, rowKeys: [], occurs: [] });
       }

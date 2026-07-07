@@ -67,7 +67,9 @@ function TestInksPage({ ctx }) {
     // Promote to regular ink production plan
     const newData = { ...data };
     newData.testInks = list.filter(x => x !== t);
-    const blank = Object.fromEntries(WEEKDAYS.map(d => [d, { 현재고: 0, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null, 호기: null }]));
+    // 현재고는 null(미입력) — 0으로 시딩하면 승격 즉시 가용 0일 빨강·소진 배지 오탐이 뜬다.
+    // (다른 시딩 경로 ink-plan/review/machines 도 모두 null 사용)
+    const blank = Object.fromEntries(WEEKDAYS.map(d => [d, { 현재고: null, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null }]));
     newData.inkPlan = [{ name: t.name, days: blank }, ...newData.inkPlan];
     setData(newData);
     notify(`'${t.name}' 정식 잉크로 승격되었습니다`);
@@ -298,8 +300,8 @@ function TestInksPage({ ctx }) {
               mode="product"
               currentValue={pickerOpen === 'quick' ? quickAdd.targetProduct : editing?.targetProduct}
               initialBrand={pickerOpen === 'quick' ? quickAdd.brand : (editing?.brand || '')}
-              onSelect={(productName) => {
-                const p = data.products.find(x => x.name === productName);
+              onSelect={(productName, picked) => {
+                const p = picked || data.products.find(x => x.name === productName);
                 const brand = p?.brand || '';
                 if (pickerOpen === 'quick') {
                   setQuickAdd({ ...quickAdd, brand, targetProduct: productName });

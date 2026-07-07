@@ -307,7 +307,10 @@ function ReviewPage({ ctx }) {
   const fixMasterBrand = (row) => {
     const newBrand = String(row.brand || '').trim();
     if (!newBrand || !row.matchedName) return;
-    const idx = data.products.findIndex(p => p.name === row.matchedName);
+    // 정체성 id 우선 — 동명 제품이면 이름 findIndex가 엉뚱한 형제에 brand를 덮어쓴다.
+    const idx = row.matchedId
+      ? data.products.findIndex(p => p.id === row.matchedId)
+      : data.products.findIndex(p => p.name === row.matchedName);
     if (idx < 0) { notify('마스터에서 해당 제품을 찾을 수 없습니다'); return; }
     const products = [...data.products];
     products[idx] = { ...products[idx], brand: newBrand, customer: newBrand };

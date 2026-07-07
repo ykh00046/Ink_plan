@@ -162,6 +162,18 @@ test('buildInventoryByInkDay: lots/daily 없으면 빈 맵', () => {
   assert.equal(DataService.buildInventoryByInkDay({ lots: [] }, {}).size, 0);
 });
 
+test('buildInventoryByInkDay: 같은 M/D 다른 연도면 최신 조사만 채택(연도 모호성 제거)', () => {
+  const inventory = {
+    lots: [{ id: 'L1', ink: '빨강' }],
+    daily: {
+      '2025-06-01': { L1: 99 },   // 작년 6/1 — 삽입 순서상 먼저지만 무시돼야 함
+      '2026-06-01': { L1: 12 },   // 올해 6/1 — 최신
+    },
+  };
+  const res = DataService.buildInventoryByInkDay(inventory, { 월: '6/1' });
+  assert.equal(res.get('빨강').get('월'), 12);
+});
+
 // ── ink-plan: mergeInkPlanAndTestInks ────────────────────────────────────────
 test('mergeInkPlanAndTestInks: 정식 유지 + testStatus 칩, 미등록 testInk는 추가', () => {
   const days = ['월', '화'];
@@ -417,6 +429,21 @@ test('buildProductGroups: 동일 제품+브랜드는 한 그룹으로 묶임', (
   assert.equal(groups.length, 1);
   assert.equal(groups[0].rowKeys.length, 2);
   assert.equal(groups[0].occurs.length, 2);
+});
+
+test('buildProductGroups: 액상/분말은 별도 그룹 — id 오적용 방지', () => {
+  // normalizeBrand("PIA / 액상")==normalizeBrand("PIA / 분말")=="PIA" 라 이전엔 병합됐다.
+  const rows = [
+    { rowKey: '주-1-0', isTest: false, ocrName: 'PIA', brand: 'PIA / 액상', variant: '액상',
+      status: 'exact', matchedName: 'PIA', matchedId: 'p_00001', machine_no: '1', shift: '주', floor: '3층' },
+    { rowKey: '주-2-1', isTest: false, ocrName: 'PIA', brand: 'PIA / 분말', variant: '분말',
+      status: 'exact', matchedName: 'PIA', matchedId: 'p_00002', machine_no: '2', shift: '주', floor: '3층' },
+  ];
+  const groups = DataService.buildProductGroups(rows);
+  assert.equal(groups.length, 2);
+  const byId = new Map(groups.map(g => [g.matchedId, g.rowKeys]));
+  assert.deepEqual(byId.get('p_00001'), ['주-1-0']);
+  assert.deepEqual(byId.get('p_00002'), ['주-2-1']);
 });
 
 // ── review/OCR: mapOcrRowsInGroup / changeMachineInGroup ─────────────────────

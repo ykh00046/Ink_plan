@@ -136,7 +136,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "forbidden"}, 403)
             return
         if path == "/api/db":
-            data = read_current()
+            # current.json 파싱 실패(손상/torn write)를 구조화된 502로 — 미처리 예외는
+            # 연결 끊김/불투명 500이 되어 프론트가 폴백(/api/seed)조차 못 탄다.
+            try:
+                data = read_current()
+            except (ValueError, OSError):
+                self.send_json({"error": "db read failed"}, 502)
+                return
             # ETag = 현재 내용 리비전 — 클라이언트가 이후 저장 시 If-Match 로 되돌려 OCC 성립.
             self.send_json(data, headers={"ETag": f'"{compute_rev(data)}"'})
             return

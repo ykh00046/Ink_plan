@@ -221,6 +221,24 @@ class AuditTrailTest(unittest.TestCase):
         self.assertEqual(changes["machineAssignments·i1"]["before"], "10호기|")
         self.assertEqual(changes["machineAssignments·i1"]["after"], "10호기|INK-001")
 
+    def test_diff_injection_object_cell_uses_name(self):
+        # 셀이 {name,id} 객체면 이름만 요약 — dict 문자열 노출·허위 변경 방지.
+        before = {"injection": {"3층": [
+            {"machine": "10호기", "schedule": {"월": {"day": "PIA"}}},
+        ]}}
+        after = {"injection": {"3층": [
+            {"machine": "10호기", "schedule": {"월": {"day": {"name": "PIA", "id": "p_00001"}}}},
+        ]}}
+        # 문자열 "PIA" → 객체 {name:PIA} 는 같은 이름이므로 변경 아님
+        self.assertEqual(storage.diff_audit(before, after), [])
+        # 실제 이름이 바뀐 경우만 변경으로 기록되고, 값은 이름 문자열
+        after2 = {"injection": {"3층": [
+            {"machine": "10호기", "schedule": {"월": {"day": {"name": "SOUL", "id": "p_00002"}}}},
+        ]}}
+        changes = {c["field"]: c for c in storage.diff_audit(before, after2)}
+        self.assertEqual(changes["injection·3층·10호기·월·day"]["before"], "PIA")
+        self.assertEqual(changes["injection·3층·10호기·월·day"]["after"], "SOUL")
+
     def test_diff_no_change_is_empty(self):
         data = {"injection": {"3층": [{"machine": "10호기", "schedule": {"월": {"day": "X"}}}]},
                 "products": [{"name": "A", "brand": "PIA", "inks": ["i1"]}]}

@@ -137,14 +137,19 @@ def _audit_flatten(data):
     d = data or {}
     flat = {}
     # injection 셀: floor·machine·day·shift → 제품명 (빈 셀은 키 자체를 만들지 않음)
+    # 셀은 레거시 문자열 또는 {name,id} 객체 — 이름만 요약(dict를 str()하면 이력에
+    # "{'name':..,'id':..}" Python dict 문자열이 노출되고, 문자열→객체 재기록이 허위 변경으로 잡힘).
+    def _cell_name(v):
+        return (v.get("name") or "") if isinstance(v, dict) else str(v or "")
     for floor, machines in (d.get("injection") or {}).items():
         for m in (machines or []):
             m = m or {}
             machine = str(m.get("machine") or m.get("name") or "")
             for day, shifts in (m.get("schedule") or {}).items():
                 for shift, value in (shifts or {}).items():
-                    if value:
-                        flat[f"injection·{floor}·{machine}·{day}·{shift}"] = str(value)
+                    name = _cell_name(value)
+                    if name:
+                        flat[f"injection·{floor}·{machine}·{day}·{shift}"] = name
     # products: name → "brand|ink1,ink2"
     for p in (d.get("products") or []):
         p = p or {}

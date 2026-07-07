@@ -69,6 +69,20 @@ function InjectionPage({ ctx }) {
     return (matches.length === 1 && matches[0].id) ? { name: value, id: matches[0].id } : value;
   };
 
+  // 편집 저장 시 셀 정체성 결정 (동명 강등 방지):
+  //  1) CascadePicker로 특정 제품을 골랐으면 그 id 캡처(동명이라도 정확)
+  //  2) 이름이 원래 셀과 같고 원래 셀에 id가 있었으면 그 id 보존
+  //  3) 그 외 — 동명 아닌 이름만 자동 캡처(toCellValue)
+  const resolveCellIdentity = (name, opts = {}) => {
+    if (!name || typeof name !== 'string' || isTestValue(name)) return name;
+    if (opts.pickedId && (data.products || []).some(p => p.id === opts.pickedId && p.name === name)) {
+      return { name, id: opts.pickedId };
+    }
+    const orig = opts.originalCell;
+    if (orig && typeof orig === 'object' && orig.id && orig.name === name) return orig;
+    return toCellValue(name);
+  };
+
   // 셀 상태: 'ok' | 'new' | 'unregistered' | 'no-inks'
   const cellStatus = (value) => {
     if (!value || isTestValue(value)) return 'ok';
@@ -95,7 +109,11 @@ function InjectionPage({ ctx }) {
       newData.products = [{ ...product, createdFromInjection: true }, ...data.products];
       notify(`마스터에 추가: '${product.name}'`);
     } else {
-      const idx = data.products.findIndex(p => p.name === editingMaster.product.name);
+      // 정체성 id 우선 — 동명 제품도 정확히 그 행을 수정(이름 findIndex는 첫 동명에 오적용).
+      const target = editingMaster.product || {};
+      const idx = target.id
+        ? data.products.findIndex(p => p.id === target.id)
+        : data.products.findIndex(p => p.name === target.name);
       if (idx >= 0) {
         newData.products = [...data.products];
         newData.products[idx] = {
@@ -131,15 +149,16 @@ function InjectionPage({ ctx }) {
     });
   }, [machines, search]);
 
-  const setCell = (mi, day, shift, value) => {
+  const setCell = (mi, day, shift, value, identityOpts) => {
     const machine = machines[mi];
     if (!machine) return;
     const fl = machine._floor;
+    const cellValue = resolveCellIdentity(value, identityOpts);
     const newData = { ...data };
     const list = [...(newData.injection[fl] || [])];
     const realIdx = list.findIndex(x => x.machine === machine.machine);
     if (realIdx < 0) return;
-    list[realIdx] = { ...list[realIdx], schedule: { ...list[realIdx].schedule, [day]: { ...list[realIdx].schedule[day], [shift]: toCellValue(value) } } };
+    list[realIdx] = { ...list[realIdx], schedule: { ...list[realIdx].schedule, [day]: { ...list[realIdx].schedule[day], [shift]: cellValue } } };
     newData.injection = { ...newData.injection, [fl]: list };
     setData(newData);
   };
@@ -289,11 +308,13 @@ function InjectionPage({ ctx }) {
                         {m.no != null && <span className="injection-machine-no">#{m.no}</span>}
                       </td>
                       {columns.map(col => {
-                        const value = cellName(m.schedule[col.day]?.[col.shift]);
-                        const isTest = isTestValue(value);
+                        // 원본 셀(문자열/{name,id})을 보존 — 상태·해소·편집이 id를 잃지 않도록.
+                        const rawCell = m.schedule[col.day]?.[col.shift];
+                        const value = cellName(rawCell);
+                        const isTest = isTestValue(rawCell);
                         const isDragOver = dragOver && dragOver.mi === realMi && dragOver.day === col.day && dragOver.shift === col.shift;
                         const isDragging = dragging && dragging.mi === realMi && dragging.day === col.day && dragging.shift === col.shift;
-                        const status = cellStatus(value);
+                        const status = cellStatus(rawCell);
                         const statusTitle = status === 'unregistered'
                           ? '마스터 미등록 — 클릭해서 추가'
                           : status === 'no-inks'
@@ -320,7 +341,7 @@ function InjectionPage({ ctx }) {
                             onDragOver={(e) => { e.preventDefault(); setDragOver({ mi: realMi, day: col.day, shift: col.shift }); }}
                             onDragLeave={() => setDragOver(null)}
                             onDrop={(e) => { e.preventDefault(); handleDrop({ mi: realMi, day: col.day, shift: col.shift }); }}
-                            onClick={() => setEditing({ mi: realMi, day: col.day, shift: col.shift, value })}
+                            onClick={() => setEditing({ mi: realMi, day: col.day, shift: col.shift, value, cell: rawCell })}
                             title={value ? `${value}${isTest ? ' · 테스트' : ''}` : '클릭하여 배정'}
                           >
                             {isTest && value && <span className="injection-cell__test" title="테스트 잉크 — 양산대응 메뉴에서 관리">TEST</span>}
@@ -345,7 +366,7 @@ function InjectionPage({ ctx }) {
                                 className="injection-cell__alert injection-cell__alert--warn"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditingMaster({ mode: 'edit', product: resolveProduct(value) });
+                                  setEditingMaster({ mode: 'edit', product: resolveProduct(rawCell) });
                                 }}
                                 title={statusTitle}
                               >잉크</button>
@@ -458,7 +479,10 @@ function InjectionPage({ ctx }) {
                   }}><Icon name="trash" size={12} /> 배정 해제</button>
                 )}
                 <button className="btn btn--primary" onClick={() => {
-                  setCell(editing.mi, editing.day, editing.shift, editing.value);
+                  setCell(editing.mi, editing.day, editing.shift, editing.value, {
+                    pickedId: editing.pickedId,
+                    originalCell: editing.cell,
+                  });
                   setEditing(null);
                   notify('배정 저장됨');
                 }} disabled={!editing.value}><Icon name="check" size={12} /> 저장</button>
@@ -471,7 +495,7 @@ function InjectionPage({ ctx }) {
                 <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{editing.value}</strong>
                 <button
                   className="btn btn--sm btn--ghost"
-                  onClick={() => setEditing({ ...editing, value: '' })}
+                  onClick={() => setEditing({ ...editing, value: '', pickedId: null, cell: '' })}
                   style={{ marginLeft: 'auto' }}
                   title="선택 해제"
                 >×</button>
@@ -494,8 +518,8 @@ function InjectionPage({ ctx }) {
               products={data.products}
               mode="product"
               currentValue={editing.value}
-              initialBrand={editing.value ? (data.products.find(p => p.name === editing.value)?.brand || '') : ''}
-              onSelect={(name) => setEditing({ ...editing, value: name })}
+              initialBrand={editing.value ? (resolveProduct(editing.cell)?.brand || '') : ''}
+              onSelect={(name, product) => setEditing({ ...editing, value: name, pickedId: product?.id || null })}
             />
           </Modal>
         )}

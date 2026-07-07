@@ -157,6 +157,7 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
 
   const [brand, setBrand] = React.useState(initBrand);
   const [productName, setProductName] = React.useState('');
+  const [productId, setProductId] = React.useState(null);
   const [brandSearch, setBrandSearch] = React.useState('');
   const [productSearch, setProductSearch] = React.useState('');
 
@@ -165,7 +166,14 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
 
   const productsInBrand = React.useMemo(() => DataService.cascadeProductsInBrand(products, brand), [brand, products]);
 
-  const inksInProduct = React.useMemo(() => DataService.cascadeInksInProduct(products, productName), [productName, products]);
+  // 잉크 컬럼: 동명 제품이면 이름만으로는 다른 제품 잉크가 뜬다 — 선택된 id로 정확히 해소.
+  const inksInProduct = React.useMemo(() => {
+    if (productId) {
+      const p = (products || []).find(x => x.id === productId);
+      if (p) return (p.inks || []).filter(Boolean);
+    }
+    return DataService.cascadeInksInProduct(products, productName);
+  }, [productId, productName, products]);
 
   const visibleBrands = React.useMemo(() => DataService.filterByQuery(brands, brandSearch, b => b), [brands, brandSearch]);
 
@@ -173,10 +181,12 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
 
   const pickProduct = (p) => {
     if (mode === 'product') {
-      onSelect(p.name);
+      // 제품 객체를 함께 전달 — 호출부가 동명 구분용 id를 캡처할 수 있게 한다.
+      onSelect(p.name, p);
       onClose?.();
     } else {
       setProductName(p.name);
+      setProductId(p.id || null);
     }
   };
 
@@ -211,7 +221,7 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
             <button
               key={b}
               className={`cascade-item ${brand === b ? 'cascade-item--active' : ''}`}
-              onClick={() => { setBrand(b); setProductName(''); setProductSearch(''); }}
+              onClick={() => { setBrand(b); setProductName(''); setProductId(null); setProductSearch(''); }}
             >
               {b}
             </button>
@@ -238,10 +248,10 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
             <div className="cascade-list">
               {visibleProducts.map(p => {
                 const inkCount = (p.inks || []).filter(Boolean).length;
-                const isActive = mode === 'ink' && productName === p.name;
+                const isActive = mode === 'ink' && (productId ? productId === p.id : productName === p.name);
                 return (
                   <button
-                    key={p.name}
+                    key={p.id || p.name}
                     className={`cascade-item ${isActive ? 'cascade-item--active' : ''}`}
                     onClick={() => pickProduct(p)}
                   >
