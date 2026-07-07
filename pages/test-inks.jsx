@@ -3,7 +3,7 @@
 function TestInksPage({ ctx }) {
   const { data, setData, notify } = ctx;
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('양산대응');
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [quickAdd, setQuickAdd] = useState({ name: '', brand: '', targetProduct: '', status: '내부검증', note: '' });
@@ -43,9 +43,15 @@ function TestInksPage({ ctx }) {
   };
 
   const handleSave = (t) => {
-    const idx = list.indexOf(editing);
-    const next = [...list];
-    next[idx] = t;
+    // editing 은 모달에서 새 객체로 교체되므로 indexOf(editing) 은 -1.
+    // 편집 시작 시 보존한 _origName(없으면 현재 name)으로 원본 행을 찾는다.
+    const cur = data.testInks || [];
+    const origName = t._origName != null ? t._origName : t.name;
+    const realIdx = cur.findIndex(x => x.name === origName);
+    if (realIdx < 0) { setEditing(null); return; }
+    const { _origName, ...clean } = t;
+    const next = [...cur];
+    next[realIdx] = clean;
     updateData(next);
     setEditing(null);
     notify('수정 완료');
@@ -61,7 +67,9 @@ function TestInksPage({ ctx }) {
     // Promote to regular ink production plan
     const newData = { ...data };
     newData.testInks = list.filter(x => x !== t);
-    const blank = Object.fromEntries(['월','화','수','목','금','토','일'].map(d => [d, { 현재고: 0, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null, 호기: null }]));
+    // 현재고는 null(미입력) — 0으로 시딩하면 승격 즉시 가용 0일 빨강·소진 배지 오탐이 뜬다.
+    // (다른 시딩 경로 ink-plan/review/machines 도 모두 null 사용)
+    const blank = Object.fromEntries(WEEKDAYS.map(d => [d, { 현재고: null, 가용일수: null, 필요수량: d === '월' ? 0 : undefined, 제조량: null }]));
     newData.inkPlan = [{ name: t.name, days: blank }, ...newData.inkPlan];
     setData(newData);
     notify(`'${t.name}' 정식 잉크로 승격되었습니다`);
@@ -72,37 +80,19 @@ function TestInksPage({ ctx }) {
       <div className="page__head">
         <div className="page__title-row">
           <div>
-            <div className="page__title">양산대응 잉크 (테스트 중)</div>
-            <div className="page__meta">시양산·내부검증 중인 잉크를 별도 관리 · 생산계획에는 <strong>테스트 중</strong>으로만 표시되며 수량 기입 불가</div>
+            <div className="page__title">양산대응 잉크</div>
+            <div className="page__meta-chips">
+              <span className="page__meta-chip">전체 <strong>{list.length}</strong>종</span>
+              <span className="page__meta-chip page__meta-chip--today">양산대응 <strong>{counts.양산대응}</strong></span>
+              <span className="page__meta-chip page__meta-chip--warn">시양산 <strong>{counts.시양산}</strong></span>
+              <span className="page__meta-chip">내부검증 <strong>{counts.내부검증}</strong></span>
+            </div>
           </div>
-          <div className="page__actions">
-            <button className="btn"><Icon name="download" /> 내보내기</button>
-          </div>
+          <div className="page__actions"></div>
         </div>
       </div>
 
       <div className="page__body">
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-          <div className="kpi" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__label">전체 테스트 잉크</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{list.length}<span className="kpi__unit">종</span></div>
-          </div>
-          <div className="kpi kpi--ok" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__accent" />
-            <div className="kpi__label">양산대응</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.양산대응}</div>
-          </div>
-          <div className="kpi kpi--warn" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__accent" />
-            <div className="kpi__label">시양산</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.시양산}</div>
-          </div>
-          <div className="kpi" style={{ flex: 1, padding: '10px 14px' }}>
-            <div className="kpi__label">내부검증</div>
-            <div className="kpi__value" style={{ fontSize: 20 }}>{counts.내부검증}</div>
-          </div>
-        </div>
-
         <Card flush>
           <div className="toolbar">
             <input className="input input--search" placeholder="잉크명 · 대상 제품 · 브랜드 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
@@ -120,7 +110,7 @@ function TestInksPage({ ctx }) {
             <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filtered.length}건</span>
           </div>
 
-          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 380px)' }}>
+          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 240px)' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -167,7 +157,7 @@ function TestInksPage({ ctx }) {
                   <td>
                     <input className="input" placeholder="메모" value={quickAdd.note} onChange={e => setQuickAdd({ ...quickAdd, note: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }} style={{ width: '100%' }} />
                   </td>
-                  <td style={{ color: 'var(--ink-500)', fontSize: 11 }}>오늘 ({dayFromDate(new Date().toISOString().slice(0,10))})</td>
+                  <td style={{ color: 'var(--ink-500)', fontSize: 11 }}>오늘 ({dayFromDate(localDateISO())})</td>
                   <td style={{ textAlign: 'right' }}>
                     <button className="btn btn--primary btn--sm" onClick={handleQuickAdd} disabled={!quickAdd.name}><Icon name="plus" size={11} /> 추가</button>
                   </td>
@@ -212,14 +202,21 @@ function TestInksPage({ ctx }) {
                       <button className="btn btn--sm btn--ghost" onClick={() => handlePromote(t)} title="정식 잉크로 승격">
                         <Icon name="check" size={11} /> 승격
                       </button>
-                      <button className="btn btn--sm btn--ghost" onClick={() => setEditing(t)}><Icon name="edit" size={11} /></button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => setEditing({ ...t, _origName: t.name })}><Icon name="edit" size={11} /></button>
                       <button className="btn btn--sm btn--ghost btn--danger" onClick={() => setConfirmDelete(t)}><Icon name="trash" size={11} /></button>
                     </td>
                   </tr>
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40 }}>등록된 테스트 잉크가 없습니다</td></tr>
+                  <tr><td colSpan="100">
+                    <div className="empty-state">
+                      <div className="empty-state__title">
+                        {search || statusFilter !== 'all' ? '조건에 맞는 테스트 잉크 없음' : '등록된 테스트 잉크 없음'}
+                      </div>
+                      <div className="empty-state__hint">표 맨 위 행에서 신규 잉크명을 입력해 추가하세요.</div>
+                    </div>
+                  </td></tr>
                 )}
               </tbody>
             </table>
@@ -303,8 +300,8 @@ function TestInksPage({ ctx }) {
               mode="product"
               currentValue={pickerOpen === 'quick' ? quickAdd.targetProduct : editing?.targetProduct}
               initialBrand={pickerOpen === 'quick' ? quickAdd.brand : (editing?.brand || '')}
-              onSelect={(productName) => {
-                const p = data.products.find(x => x.name === productName);
+              onSelect={(productName, picked) => {
+                const p = picked || data.products.find(x => x.name === productName);
                 const brand = p?.brand || '';
                 if (pickerOpen === 'quick') {
                   setQuickAdd({ ...quickAdd, brand, targetProduct: productName });

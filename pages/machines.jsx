@@ -1,5 +1,4 @@
-// 잉크 추가 페이지 — 잉크 → 호기 매핑 마스터
-// (원래는 '호기 배정'이었으나, 데이터가 사실 '잉크→호기'라서 명칭 정정)
+// 잉크 추가 및 관리 페이지 — 잉크 → 호기 매핑 마스터
 
 function MachinesPage({ ctx }) {
   const { data, setData, notify } = ctx;
@@ -8,8 +7,8 @@ function MachinesPage({ ctx }) {
   const [editingIdx, setEditingIdx] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [newRow, setNewRow] = useState({ name: '', machine: '' });
-  const [quickAdd, setQuickAdd] = useState({ name: '', machine: '' });
+  const [newRow, setNewRow] = useState({ code: '', name: '', machine: '' });
+  const [quickAdd, setQuickAdd] = useState({ code: '', name: '', machine: '' });
 
   const machineList = useMemo(() => {
     const s = new Set((data.machineAssignments || []).map(a => a.machine).filter(Boolean));
@@ -24,18 +23,32 @@ function MachinesPage({ ctx }) {
   const existingInkNamesNorm = useMemo(() => {
     const s = new Set();
     for (const i of (data.inkPlan || [])) {
-      if (i.name) s.add(i.name.trim().toLowerCase());
+      if (i.name) s.add(DataService.normalizeInkName(i.name));
     }
     for (const a of (data.machineAssignments || [])) {
       const n = inkOfAssignment(a);
-      if (n) s.add(n.trim().toLowerCase());
+      if (n) s.add(DataService.normalizeInkName(n));
     }
     return s;
   }, [data.inkPlan, data.machineAssignments]);
 
   const isDuplicateInk = (name) => {
-    const norm = name.trim().toLowerCase();
+    const norm = DataService.normalizeInkName(name);
     return norm && existingInkNamesNorm.has(norm);
+  };
+
+  // 품목코드 중복 검사
+  const existingCodesNorm = useMemo(() => {
+    const s = new Set();
+    for (const a of (data.machineAssignments || [])) {
+      if (a.code) s.add(a.code.trim().toLowerCase());
+    }
+    return s;
+  }, [data.machineAssignments]);
+
+  const isDuplicateCode = (code) => {
+    const norm = code.trim().toLowerCase();
+    return norm && existingCodesNorm.has(norm);
   };
 
   const filtered = useMemo(() => {
@@ -45,11 +58,17 @@ function MachinesPage({ ctx }) {
       list = list.filter(a =>
         inkOfAssignment(a).toLowerCase().includes(q)
         || (a.machine || '').toLowerCase().includes(q)
+        || (a.code || '').toLowerCase().includes(q)
       );
     }
     if (machineFilter !== 'all') list = list.filter(a => a.machine === machineFilter);
     return list;
   }, [data.machineAssignments, search, machineFilter]);
+
+  // 표 성능: 한 번에 그리는 행 수 제한 (1500+ 행 통째 DOM이면 버벅임)
+  const VISIBLE_LIMIT = 200;
+  const visible = filtered.slice(0, VISIBLE_LIMIT);
+  const hiddenCount = filtered.length - visible.length;
 
   // 호기별 분포
   const byMachine = useMemo(() => {
@@ -61,11 +80,13 @@ function MachinesPage({ ctx }) {
     return m;
   }, [data.machineAssignments]);
 
-  const handleSaveEdit = (idx) => {
+  const handleSaveEdit = (target) => {
+    // target 은 data.machineAssignments 의 실제 객체(필터는 참조 보존). 위치 인덱스 대신
+    // 객체로 찾아 검색/필터가 바뀌어도 엉뚱한 행을 덮어쓰지 않게 한다.
     const newData = { ...data };
     newData.machineAssignments = [...newData.machineAssignments];
-    const target = filtered[idx];
     const realIdx = newData.machineAssignments.indexOf(target);
+    if (realIdx < 0) { setEditingIdx(null); return; }
     newData.machineAssignments[realIdx] = { ...target, machine: editValue };
     setData(newData);
     setEditingIdx(null);
@@ -79,48 +100,52 @@ function MachinesPage({ ctx }) {
     notify('잉크가 삭제되었습니다');
   };
 
-  const handleQuickAdd = () => {
-    const name = quickAdd.name.trim();
-    if (!name) return;
-    if (isDuplicateInk(name)) {
-      notify(`'${name}' 잉크는 이미 등록되어 있어`);
-      return;
-    }
+  // 잉크 마스터에 등록 (machineAssignments + inkPlan). 품목코드 필수.
+  const registerInk = ({ code, name, machine }) => {
+    if (!code || !name) return false;
     const newData = { ...data };
     newData.machineAssignments = [
-      { ink: name, machine: quickAdd.machine.trim() },
+      { ink: name, machine: machine || '', code },
       ...(newData.machineAssignments || []),
     ];
-    // 잉크 마스터에도 등록 (inkPlan에 없으면 빈 days로 추가)
-    if (!(data.inkPlan || []).some(i => i.name?.trim().toLowerCase() === name.toLowerCase())) {
-      const blank = Object.fromEntries(['월','화','수','목','금','토','일'].map(d => [d, {
+    if (!(data.inkPlan || []).some(i => DataService.normalizeInkName(i.name) === DataService.normalizeInkName(name))) {
+      const blank = Object.fromEntries(WEEKDAYS.map(d => [d, {
         '현재고': null, '가용일수': null, '필요수량': d === '월' ? null : undefined, '제조량': null,
       }]));
       newData.inkPlan = [{ name, days: blank }, ...(newData.inkPlan || [])];
     }
     setData(newData);
+    return true;
+  };
+
+  const handleQuickAdd = () => {
+    const code = quickAdd.code.trim();
+    const name = quickAdd.name.trim();
+    if (!name) return;
+    if (!code) { notify('품목코드를 입력해야 등록할 수 있어'); return; }
+    if (isDuplicateCode(code)) { notify(`품목코드 '${code}'는 이미 등록되어 있어`); return; }
+    if (isDuplicateInk(name)) {
+      notify(`'${name}' 잉크는 이미 등록되어 있어`);
+      return;
+    }
+    registerInk({ code, name, machine: quickAdd.machine.trim() });
     notify(`'${name}' 잉크 추가됨`);
-    setQuickAdd({ name: '', machine: '' });
+    setQuickAdd({ code: '', name: '', machine: '' });
   };
 
   const handleAdd = () => {
+    const code = newRow.code.trim();
     const name = newRow.name.trim();
     if (!name) return;
+    if (!code) { notify('품목코드를 입력해야 저장할 수 있어'); return; }
+    if (isDuplicateCode(code)) { notify(`품목코드 '${code}'는 이미 등록되어 있어`); return; }
     if (isDuplicateInk(name)) {
       notify(`'${name}' 잉크는 이미 등록되어 있어`);
       return;
     }
-    const newData = { ...data };
-    newData.machineAssignments = [{ ink: name, machine: newRow.machine.trim() }, ...(newData.machineAssignments || [])];
-    if (!(data.inkPlan || []).some(i => i.name?.trim().toLowerCase() === name.toLowerCase())) {
-      const blank = Object.fromEntries(['월','화','수','목','금','토','일'].map(d => [d, {
-        '현재고': null, '가용일수': null, '필요수량': d === '월' ? null : undefined, '제조량': null,
-      }]));
-      newData.inkPlan = [{ name, days: blank }, ...(newData.inkPlan || [])];
-    }
-    setData(newData);
+    registerInk({ code, name, machine: newRow.machine.trim() });
     setAddOpen(false);
-    setNewRow({ name: '', machine: '' });
+    setNewRow({ code: '', name: '', machine: '' });
     notify('잉크가 추가되었습니다');
   };
 
@@ -129,8 +154,11 @@ function MachinesPage({ ctx }) {
       <div className="page__head">
         <div className="page__title-row">
           <div>
-            <div className="page__title">잉크 추가</div>
-            <div className="page__meta">잉크 마스터 · 사용 호기 매핑</div>
+            <div className="page__title">잉크 추가 및 관리</div>
+            <div className="page__meta-chips">
+              <span className="page__meta-chip">전체 <strong>{(data.machineAssignments || []).length}</strong>개 잉크</span>
+              <span className="page__meta-chip">호기 <strong>{machineList.length}</strong>대</span>
+            </div>
           </div>
           <div className="page__actions">
             <button className="btn"><Icon name="download" /> 내보내기</button>
@@ -156,6 +184,7 @@ function MachinesPage({ ctx }) {
                 <thead>
                   <tr>
                     <th style={{ width: 40 }}>#</th>
+                    <th style={{ width: 110 }}>품목코드</th>
                     <th>잉크명</th>
                     <th style={{ width: 140 }}>사용 호기</th>
                     <th style={{ width: 100, textAlign: 'right' }}>액션</th>
@@ -165,6 +194,23 @@ function MachinesPage({ ctx }) {
                   {/* Quick add row */}
                   <tr style={{ background: 'var(--brand-50)' }}>
                     <td className="row-num" style={{ background: 'var(--brand-50)' }}>+</td>
+                    <td>
+                      <input
+                        className="input"
+                        placeholder="품목코드*"
+                        value={quickAdd.code}
+                        onChange={e => setQuickAdd({ ...quickAdd, code: e.target.value })}
+                        onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }}
+                        style={{
+                          width: '100%',
+                          fontFamily: 'JetBrains Mono, monospace',
+                          borderColor: (quickAdd.name.trim() && !quickAdd.code.trim()) || (quickAdd.code.trim() && isDuplicateCode(quickAdd.code)) ? 'var(--bad-500)' : undefined,
+                        }}
+                      />
+                      {quickAdd.code.trim() && isDuplicateCode(quickAdd.code) && (
+                        <div style={{ fontSize: 10, color: 'var(--bad-600)', marginTop: 2 }}>이미 쓰는 코드</div>
+                      )}
+                    </td>
                     <td>
                       <input
                         className="input"
@@ -196,43 +242,60 @@ function MachinesPage({ ctx }) {
                       <button
                         className="btn btn--primary btn--sm"
                         onClick={handleQuickAdd}
-                        disabled={!quickAdd.name.trim() || isDuplicateInk(quickAdd.name)}
+                        disabled={!quickAdd.name.trim() || !quickAdd.code.trim() || isDuplicateInk(quickAdd.name) || isDuplicateCode(quickAdd.code)}
                       >
                         <Icon name="plus" size={11} /> 추가
                       </button>
                     </td>
                   </tr>
-                  {filtered.map((a, idx) => {
+                  {visible.map((a, idx) => {
                     const inkName = inkOfAssignment(a);
                     return (
                       <tr key={inkName + (a.machine || '') + idx}>
                         <td className="row-num">{idx + 1}</td>
+                        <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: a.code ? 'var(--ink-700)' : 'var(--bad-500)' }}>
+                          {a.code || '미입력'}
+                        </td>
                         <td style={{ fontWeight: 500 }}>{inkName}</td>
                         <td>
-                          {editingIdx === idx ? (
+                          {editingIdx === a ? (
                             <input
                               className="input" autoFocus
                               list="machine-list"
                               value={editValue}
                               onChange={e => setEditValue(e.target.value)}
-                              onBlur={() => handleSaveEdit(idx)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(idx); if (e.key === 'Escape') setEditingIdx(null); }}
+                              onBlur={() => handleSaveEdit(a)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(a); if (e.key === 'Escape') setEditingIdx(null); }}
                               style={{ width: 120 }}
                             />
                           ) : (
-                            <span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }} onClick={() => { setEditingIdx(idx); setEditValue(a.machine || ''); }}>
+                            <span className="tag" style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }} onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}>
                               {a.machine || <span style={{ color: 'var(--ink-400)' }}>호기 미지정</span>}
                             </span>
                           )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn--sm btn--ghost" onClick={() => { setEditingIdx(idx); setEditValue(a.machine || ''); }}><Icon name="edit" size={11} /></button>
+                          <button className="btn btn--sm btn--ghost" onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}><Icon name="edit" size={11} /></button>
                           <button className="btn btn--sm btn--ghost btn--danger" onClick={() => handleDelete(a)}><Icon name="trash" size={11} /></button>
                         </td>
                       </tr>
                     );
                   })}
-                  {filtered.length === 0 && <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40 }}>잉크가 없습니다</td></tr>}
+                  {hiddenCount > 0 && (
+                    <tr><td colSpan="100" style={{ textAlign: 'center', padding: '12px', color: 'var(--ink-500)', fontSize: 12, background: 'var(--ink-50)' }}>
+                      위 {VISIBLE_LIMIT}개만 표시 중 · <strong>{hiddenCount}개 더 있음</strong> — 검색으로 좁혀보세요
+                    </td></tr>
+                  )}
+                  {filtered.length === 0 && (
+                    <tr><td colSpan="100">
+                      <div className="empty-state">
+                        <div className="empty-state__title">
+                          {search || machineFilter !== 'all' ? '조건에 맞는 잉크 없음' : '등록된 잉크 없음'}
+                        </div>
+                        <div className="empty-state__hint">표 맨 위 행에서 품목코드·잉크명·호기를 입력해 추가하세요.</div>
+                      </div>
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
               <datalist id="machine-list">{machineList.map(m => <option key={m} value={m} />)}</datalist>
@@ -270,11 +333,31 @@ function MachinesPage({ ctx }) {
                 <button
                   className="btn btn--primary"
                   onClick={handleAdd}
-                  disabled={!newRow.name.trim() || isDuplicateInk(newRow.name)}
+                  disabled={!newRow.name.trim() || !newRow.code.trim() || isDuplicateInk(newRow.name) || isDuplicateCode(newRow.code)}
                 ><Icon name="save" size={12} /> 저장</button>
               </>
             }
           >
+            <div className="field">
+              <label className="field__label">품목코드<span className="req">*</span></label>
+              <input
+                className="input"
+                value={newRow.code}
+                onChange={e => setNewRow({ ...newRow, code: e.target.value })}
+                placeholder="예: BC1499"
+                autoFocus
+                style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  borderColor: newRow.code.trim() && isDuplicateCode(newRow.code) ? 'var(--bad-500)' : undefined,
+                }}
+              />
+              {!newRow.code.trim() && (
+                <div className="field__hint" style={{ color: 'var(--bad-600)' }}>품목코드는 필수입니다.</div>
+              )}
+              {newRow.code.trim() && isDuplicateCode(newRow.code) && (
+                <div className="field__hint" style={{ color: 'var(--bad-600)' }}>이미 등록된 품목코드 — 다른 코드를 사용해.</div>
+              )}
+            </div>
             <div className="row-2">
               <div className="field">
                 <label className="field__label">잉크명<span className="req">*</span></label>
@@ -283,14 +366,10 @@ function MachinesPage({ ctx }) {
                   value={newRow.name}
                   onChange={e => setNewRow({ ...newRow, name: e.target.value })}
                   placeholder="신규 잉크명"
-                  autoFocus
                   style={{ borderColor: newRow.name && isDuplicateInk(newRow.name) ? 'var(--bad-500)' : undefined }}
                 />
                 {newRow.name && isDuplicateInk(newRow.name) && (
                   <div className="field__hint" style={{ color: 'var(--bad-600)' }}>이미 등록된 잉크 — 다른 이름을 사용해.</div>
-                )}
-                {!newRow.name && (
-                  <div className="field__hint">새 잉크명을 입력. 기존 잉크에 호기만 바꾸려면 위 표에서 직접 수정.</div>
                 )}
               </div>
               <div className="field">

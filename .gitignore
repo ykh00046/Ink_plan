@@ -2,6 +2,23 @@
 node_modules/
 dist/
 build/
+release/
 .env
 .env.*
 *.log
+*.bak
+__pycache__/
+.pytest_cache/
+*.pyc
+data/db/
+data/backups/
+data/settings.json
+.pytest-tmp/
+.pytest_tmp/
+.pytest_cache/
+
+# bkit 툴 런타임/상태 (프로젝트 코드 아님)
+.bkit/
+.pytest-tmp/
+.pytest_tmp/
+.tmp/

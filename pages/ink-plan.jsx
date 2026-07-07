@@ -1,114 +1,266 @@
 // 잉크 생산계획 v3 — 엑셀식 셀 입력 (항상 input, Enter→아래 셀), 양산 이력 보존, 폭 조정
+//
+// 구조 (위→아래):
+//   1) 모듈 스코프 — focus 헬퍼, 순수 파생 함수 (productLookup, demand, inventory, metrics)
+//   2) sub-component — InkPlanToolbar · InkPlanRow · AutoAssignModal
+//   3) InkPlanPage — state · useMemo 체인 · 사출계획·재고와의 양방향 sync · 표 조립
+//   4) 셀 component — InkNameCell · CellNumInput · CellTextInput · InkMachineReadonly
 
-// 같은 컬럼의 다음 row input으로 focus 이동
-function focusNextCellInColumn(currentInput) {
-  const cell = currentInput.closest('td');
-  if (!cell) return;
-  const row = cell.parentElement;
-  const cellIdx = Array.from(row.children).indexOf(cell);
-  let next = row.nextElementSibling;
-  while (next) {
-    const inp = next.children[cellIdx]?.querySelector('input');
-    if (inp && !inp.disabled) { inp.focus(); inp.select(); return; }
-    next = next.nextElementSibling;
-  }
-  currentInput.blur();
+const INKPLAN_DAYS = DataService.WEEKDAYS; // 요일 단일 출처(data-service.js)
+
+// 같은 컬럼의 다음 row input으로 focus 이동 — ui.jsx 공용 focusNextInColumn 사용
+// (data-focuscol 명시 키 기반: td 위치 인덱스 순회의 colSpan/마크업 취약성 제거)
+
+// ── 모듈 스코프 순수 파생 함수 ───────────────────────────────────────────────
+// 모두 입력만 받아 새 자료구조를 반환 — 컴포넌트 안 useMemo 에서 호출.
+
+// ── 순수 파생 엔진은 data-service.js로 이전됨 (R3-1순위) — DataService 위임 alias ──
+const buildProductLookup       = DataService.buildProductLookup;
+const resolveProductIn         = DataService.resolveProductIn;
+const buildProductsUsingInk    = DataService.buildProductsUsingInk;
+const buildDemandByInkDay      = DataService.buildDemandByInkDay;
+const buildInkToMachine        = DataService.buildInkToMachine;
+const buildInventoryByInkDay   = DataService.buildInventoryByInkDay;
+const mergeInkPlanAndTestInks  = DataService.mergeInkPlanAndTestInks;
+const computeInkMetrics        = DataService.computeInkMetrics;
+const buildAutoAssignCandidates= DataService.buildAutoAssignCandidates;
+
+// ── sub-component: 상단 toolbar ─────────────────────────────────────────────
+
+function InkPlanToolbar({
+  search, setSearch, dayFilter, setDayFilter, today, threeDays,
+  showTestOnly, setShowTestOnly, testCount, filteredCount,
+}) {
+  return (
+    <div className="toolbar">
+      <input
+        className="input input--search"
+        placeholder="잉크명 검색"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        style={{ minWidth: 200 }}
+      />
+      <Seg
+        value={dayFilter}
+        onChange={setDayFilter}
+        options={[
+          { value: 'all', label: '전체 (월~일)' },
+          { value: 'today', label: `당일 (${today})` },
+          { value: '3days', label: `3일 (${threeDays.join('·')})` },
+        ]}
+      />
+      <button
+        className={`btn btn--sm ${showTestOnly ? 'btn--primary' : ''}`}
+        onClick={() => setShowTestOnly(v => !v)}
+        title="테스트 잉크만 보기"
+        style={{ marginLeft: 4 }}
+      >
+        <Icon name="flask" size={11} /> 테스트만 ({testCount})
+      </button>
+      <div className="spacer" />
+      <span className="inkplan-legend" title="재고 조사 페이지에서 자동으로 채워진 재고 (Lot 합산)">
+        <span className="inkplan-legend__swatch" /> 재고 조사 연동
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filteredCount}건</span>
+    </div>
+  );
 }
+
+// ── sub-component: 한 잉크의 행 ──────────────────────────────────────────────
+
+function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsingInk, inkToMachine, onUpdateCell }) {
+  const statusTone = ink.testStatus === '양산대응' ? 'ok'
+    : ink.testStatus === '시양산' ? 'warn' : 'info';
+  const usedBy = productsUsingInk.get(ink.name) || [];
+
+  return (
+    <tr className="inkplan-row">
+      <td className="sticky-col inkplan-namecell">
+        <InkNameCell
+          name={ink.name}
+          usedBy={usedBy}
+          testStatus={ink.testStatus}
+          statusTone={statusTone}
+        />
+      </td>
+      <td className="sticky-col-2 inkplan-machine-cell">
+        <InkMachineReadonly machine={inkToMachine.get(ink.name)} />
+      </td>
+      {visibleDays.map(d => {
+        const dd = ink.days[d] || {};
+        const metrics = computedByInk.get(ink.name)?.get(d) || {};
+        const av = metrics.availableDays;
+        const avColor = av != null && Number(av) < 0 ? 'var(--bad-600)'
+          : Number(av) <= 1 ? 'var(--bad-600)'
+          : Number(av) <= 3 ? 'var(--warn-600)' : 'inherit';
+        const isToday = d === today;
+        const cellBg = isToday ? 'oklch(0.985 0.012 245)' : undefined;
+        // 양산대응 시작 요일부터는 잠금
+        const locked = ink.testStatus && days.indexOf(d) >= days.indexOf(ink.startDay || '월');
+        const colspan = d === '월' ? 4 : 3;
+
+        if (locked) {
+          return (
+            <td key={d} colSpan={colspan} className="inkplan-cell inkplan-cell--locked" style={{ background: cellBg }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--warn-700)' }}>
+                <Icon name="flask" size={11} /> 양산대응
+              </span>
+            </td>
+          );
+        }
+
+        const stockFromInv = metrics.stockFromInv;
+        const displayStock = (dd['현재고'] != null) ? dd['현재고'] : metrics.stock;
+        const weeklyNeed = d === '월' ? metrics.weeklyNeed : null;
+
+        return (
+          <React.Fragment key={d}>
+            <td
+              className="num inkplan-cell"
+              style={{
+                background: stockFromInv
+                  ? (isToday ? 'oklch(0.93 0.05 200)' : 'oklch(0.96 0.03 200)')
+                  : cellBg,
+              }}
+              title={stockFromInv
+                ? '재고 조사에서 자동 입력 (Lot 합산). 수동 수정 가능 — 단 재고 조사 변경 시 그 값으로 덮어씌워짐'
+                : ''}
+            >
+              <CellNumInput
+                value={displayStock}
+                focusCol={`${d}:현재고`}
+                onCommit={v => onUpdateCell(ink.name, d, '현재고', v)}
+              />
+            </td>
+            <td className="num inkplan-cell inkplan-cell--readonly" style={{
+              color: avColor,
+              fontWeight: av != null && Number(av) <= 3 ? 600 : 400,
+              background: cellBg,
+            }}>
+              {fmtNum(av)}
+            </td>
+            {d === '월' && (
+              <td
+                className="num inkplan-cell inkplan-cell--readonly"
+                style={{
+                  background: cellBg,
+                  color: weeklyNeed != null && Number(weeklyNeed) < 0 ? 'var(--bad-600)' : 'inherit',
+                  fontWeight: weeklyNeed != null && Number(weeklyNeed) < 0 ? 600 : 400,
+                }}
+                title="월요일 재고 - 이번 주 사출계획 잉크 필요량 합계"
+              >
+                {fmtNum(weeklyNeed)}
+              </td>
+            )}
+            <td className="num inkplan-cell inkplan-cell--manu" style={{
+              background: dd['제조량'] ? 'var(--brand-50)' : cellBg,
+              color: dd['제조량'] ? 'var(--brand-700)' : 'inherit',
+              fontWeight: dd['제조량'] ? 600 : 400,
+            }}>
+              <CellNumInput
+                value={dd['제조량']}
+                focusCol={`${d}:제조량`}
+                onCommit={v => onUpdateCell(ink.name, d, '제조량', v)}
+              />
+            </td>
+          </React.Fragment>
+        );
+      })}
+    </tr>
+  );
+}
+
+// ── sub-component: 자동 배정 미리보기 모달 ───────────────────────────────────
+
+function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
+  return (
+    <Modal
+      title={`자동 배정 미리보기 — 당일 (${today}, ${dates[today]})`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>취소</button>
+          <button
+            className="btn btn--primary"
+            onClick={onApply}
+            disabled={candidates.length === 0}
+          >
+            <Icon name="check" size={12} /> {candidates.length}개 적용
+          </button>
+        </>
+      }
+    >
+      <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)', padding: 10, background: 'var(--brand-50)', borderRadius: 8 }}>
+        <Icon name="sparkle" size={12} /> 당일 제조량이 비어있고, <strong>월요일 필요수량이 음수(부족)</strong>인 정식 잉크의 빈 제조량 셀에 <strong>|필요수량|</strong> 을 채웁니다. 양산대응 잠금 셀은 제외.
+      </div>
+      {candidates.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-500)' }}>
+          자동 배정 대상이 없습니다.
+        </div>
+      ) : (
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>잉크</th>
+              <th style={{ width: 100, textAlign: 'right' }}>필요수량 (월)</th>
+              <th style={{ width: 110, textAlign: 'right' }}>제조량 (예정)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map(c => (
+              <tr key={c.name}>
+                <td style={{ fontWeight: 500 }}>{c.name}</td>
+                <td style={{ textAlign: 'right', color: 'var(--bad-600)', fontFamily: 'JetBrains Mono, monospace' }}>{c.need}</td>
+                <td style={{ textAlign: 'right', color: 'var(--brand-700)', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace' }}>{c.suggested}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}
+
+// ── InkPlanPage ──────────────────────────────────────────────────────────────
 
 function InkPlanPage({ ctx }) {
   const { data, setData, notify, today, dates } = ctx;
   const [search, setSearch] = useState('');
-  const [dayFilter, setDayFilter] = useState('all'); // all | today | 3days
+  const [dayFilter, setDayFilter] = useState('3days'); // all | today | 3days
   const [showTestOnly, setShowTestOnly] = useState(false);
+  const [showAutoAssign, setShowAutoAssign] = useState(false);
 
-  const days = ['월', '화', '수', '목', '금', '토', '일'];
-  const todayIdx = days.indexOf(today);
-  const threeDays = [days[Math.max(0, todayIdx - 1)], today, days[Math.min(6, todayIdx + 1)]];
+  const days = INKPLAN_DAYS;
+  const threeDays = useMemo(() => DataService.getVisibleWeekdays(days, today, '3days'), [today]);
 
   const visibleDays = useMemo(() => {
     if (dayFilter === 'today') return [today];
     if (dayFilter === '3days') return threeDays;
     return days;
-  }, [dayFilter]);
+  }, [dayFilter, today, threeDays]);
 
-  // 잉크 → "사출계획에서 이 잉크를 쓰는 제품 목록"
-  const productsUsingInk = useMemo(() => {
-    const inUse = new Set();
-    for (const floor of Object.keys(data.injection || {})) {
-      for (const m of data.injection[floor]) {
-        for (const sh of Object.values(m.schedule || {})) {
-          if (sh.day) inUse.add(sh.day);
-          if (sh.night) inUse.add(sh.night);
-        }
-      }
-    }
-    const map = new Map();
-    for (const p of data.products) {
-      if (!inUse.has(p.name)) continue;
-      for (const ink of (p.inks || [])) {
-        if (!ink) continue;
-        if (!map.has(ink)) map.set(ink, []);
-        if (!map.get(ink).includes(p.name)) map.get(ink).push(p.name);
-      }
-    }
-    return map;
-  }, [data.injection, data.products]);
-
-  // 잉크 → 호기 매핑 (read-only, 잉크 추가 페이지에서만 편집)
-  const inkToMachine = useMemo(() => {
-    const m = new Map();
-    for (const a of (data.machineAssignments || [])) {
-      const ink = inkOfAssignment(a);
-      if (ink && !m.has(ink)) m.set(ink, a.machine || '');
-    }
-    return m;
-  }, [data.machineAssignments]);
-
-  // 재고 조사 연동: 잉크명 × 요일 → lot 합산 재고 (Map<ink, Map<dayKor, sum>>)
-  // dates 매핑('수' → '5/13')과 inv 일자(YYYY-MM-DD)의 M/D 부분을 비교해서 매칭
-  // 정책: 잉크 생산계획에서 수동 수정 가능. 단 재고 조사가 바뀌면 그 값으로 덮어씀(useEffect)
-  const inventoryByInkDay = useMemo(() => {
-    const result = new Map();
-    const inv = data.inventory;
-    if (!inv || !inv.lots || !inv.daily) return result;
-
-    const lotsByInk = new Map();
-    for (const lot of inv.lots) {
-      if (!lotsByInk.has(lot.ink)) lotsByInk.set(lot.ink, []);
-      lotsByInk.get(lot.ink).push(lot);
-    }
-    // '5/13' → '수' 역매핑
-    const mdToDay = {};
-    for (const [day, md] of Object.entries(dates)) mdToDay[md] = day;
-
-    for (const [dateIso, valueMap] of Object.entries(inv.daily)) {
-      const dt = new Date(dateIso);
-      if (isNaN(dt)) continue;
-      const md = `${dt.getMonth() + 1}/${dt.getDate()}`;
-      const dayKor = mdToDay[md];
-      if (!dayKor) continue;
-      for (const [inkName, lots] of lotsByInk.entries()) {
-        let sum = 0, any = false;
-        for (const lot of lots) {
-          const v = valueMap[lot.id];
-          if (v !== undefined && v !== null && !isNaN(Number(v))) {
-            sum += Number(v); any = true;
-          }
-        }
-        if (any) {
-          if (!result.has(inkName)) result.set(inkName, new Map());
-          result.get(inkName).set(dayKor, sum);
-        }
-      }
-    }
-    return result;
-  }, [data.inventory]);
+  const productLookup = useMemo(() => buildProductLookup(data.products), [data.products]);
+  const productsUsingInk = useMemo(
+    () => buildProductsUsingInk(data.injection, productLookup),
+    [data.injection, productLookup],
+  );
+  const demandByInkDay = useMemo(
+    () => buildDemandByInkDay(data.injection, productLookup),
+    [data.injection, productLookup],
+  );
+  const inkToMachine = useMemo(
+    () => buildInkToMachine(data.machineAssignments),
+    [data.machineAssignments],
+  );
+  const inventoryByInkDay = useMemo(
+    () => buildInventoryByInkDay(data.inventory, dates),
+    [data.inventory, dates],
+  );
 
   // 재고 조사 변경 시 잉크 생산계획의 수동값 덮어쓰기
   // inv 데이터가 바뀐 잉크/요일은 dd['현재고']를 clear → inv 가 자연스럽게 우선 표시됨
   useEffect(() => {
     if (!data.inventory) return;
-    let changed = false;
     const newInkPlan = data.inkPlan.map(ink => {
       const invMap = inventoryByInkDay.get(ink.name);
       if (!invMap) return ink;
@@ -124,45 +276,33 @@ function InkPlanPage({ ctx }) {
       return inkChanged ? { ...ink, days: newDays } : ink;
     });
     if (newInkPlan.some((ink, i) => ink !== data.inkPlan[i])) {
-      changed = true;
       setData({ ...data, inkPlan: newInkPlan });
     }
   }, [data.inventory]); // inventory 변경 시만 실행
 
-  // 정식 잉크 + 테스트 잉크 머지
-  // 같은 이름이 양쪽에 있으면 정식 inkPlan 데이터를 유지하고 testStatus 칩만 표시 (양산 이력 보존)
-  const merged = useMemo(() => {
-    const testMap = new Map((data.testInks || []).map(t => [t.name, t]));
-    const formalNames = new Set(data.inkPlan.map(i => i.name));
+  const merged = useMemo(
+    () => mergeInkPlanAndTestInks(data.inkPlan, data.testInks, days),
+    [data.inkPlan, data.testInks],
+  );
 
-    const formal = data.inkPlan.map(i => {
-      const t = testMap.get(i.name);
-      return {
-        ...i,
-        isTest: false,
-        testStatus: t?.status || null,
-        testNote: t?.note || '',
-        startDay: t ? dayFromDate(t.addedDate) : '월',
-      };
-    });
-    const testOnly = (data.testInks || [])
-      .filter(t => !formalNames.has(t.name))
-      .map(t => ({
-        name: t.name,
-        isTest: true,
-        testStatus: t.status,
-        testNote: t.note,
-        startDay: dayFromDate(t.addedDate),
-        days: Object.fromEntries(days.map(d => [d, {}])),
-      }));
-    return [...formal, ...testOnly];
-  }, [data.inkPlan, data.testInks]);
+  const computedByInk = useMemo(
+    () => computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days),
+    [merged, demandByInkDay, inventoryByInkDay],
+  );
 
   const hasDayData = (ink, dList) => {
+    const computed = computedByInk.get(ink.name);
     for (const d of dList) {
       const dd = ink.days[d];
+      const metrics = computed?.get(d);
+      if (metrics && (
+        metrics.stock !== null ||
+        metrics.required ||
+        metrics.availableDays !== null ||
+        metrics.weeklyNeed !== null
+      )) return true;
       if (!dd) continue;
-      for (const k of ['현재고', '가용일수', '필요수량', '제조량', '호기']) {
+      for (const k of ['현재고', '제조량']) {
         const v = dd[k];
         if (v !== null && v !== undefined && v !== '' && v !== 0) return true;
       }
@@ -185,15 +325,16 @@ function InkPlanPage({ ctx }) {
       if (a.isTest !== b.isTest) return a.isTest ? 1 : -1;
       const minAvail = (ink) => {
         let m = 999;
+        const computed = computedByInk.get(ink.name);
         for (const d of visibleDays) {
-          const v = ink.days[d]?.['가용일수'];
+          const v = computed?.get(d)?.availableDays;
           if (v != null && !isNaN(Number(v))) m = Math.min(m, Number(v));
         }
         return m;
       };
       return minAvail(a) - minAvail(b);
     });
-  }, [merged, search, showTestOnly, dayFilter, visibleDays]);
+  }, [merged, search, showTestOnly, dayFilter, visibleDays, computedByInk]);
 
   const updateCell = (inkName, day, key, raw) => {
     const newData = { ...data };
@@ -206,9 +347,7 @@ function InkPlanPage({ ctx }) {
       newData.inkPlan = [{ name: inkName, days: blank }, ...newData.inkPlan];
       idx = 0;
     }
-    const value = key === '호기'
-      ? (raw === '' ? null : String(raw))
-      : (raw === '' || raw == null ? null : (isNaN(Number(raw)) ? raw : Number(raw)));
+    const value = raw === '' || raw == null ? null : (isNaN(Number(raw)) ? raw : Number(raw));
     newData.inkPlan = [...newData.inkPlan];
     newData.inkPlan[idx] = { ...newData.inkPlan[idx] };
     newData.inkPlan[idx].days = { ...newData.inkPlan[idx].days };
@@ -218,42 +357,10 @@ function InkPlanPage({ ctx }) {
 
   const testCount = (data.testInks || []).length;
 
-  // 자동 배정 대상 미리보기:
-  //  - 정식 잉크 중 당일(today) 제조량이 비어있고
-  //  - 월요일 필요수량이 음수(=부족분)인 행
-  //  - 양산대응으로 잠긴 셀 제외
-  const autoAssignCandidates = useMemo(() => {
-    const out = [];
-    const testMap = new Map((data.testInks || []).map(t => [t.name, t]));
-    const todayIdx = days.indexOf(today);
-
-    for (const ink of (data.inkPlan || [])) {
-      const todayCell = ink.days?.[today] || {};
-      const cur = todayCell['제조량'];
-      if (cur != null && cur !== '') continue;  // 이미 값 있으면 skip
-
-      const need = ink.days?.['월']?.['필요수량'];
-      if (need == null || need === '') continue;
-      const needNum = Number(need);
-      if (isNaN(needNum) || needNum >= 0) continue;  // 부족(음수)인 경우만
-
-      // 양산대응 잠금 여부
-      const t = testMap.get(ink.name);
-      if (t) {
-        const startIdx = days.indexOf(dayFromDate(t.addedDate));
-        if (todayIdx >= startIdx) continue;  // 잠긴 셀
-      }
-
-      out.push({
-        name: ink.name,
-        need: needNum,
-        suggested: Math.abs(needNum),
-      });
-    }
-    return out;
-  }, [data.inkPlan, data.testInks, today, days]);
-
-  const [showAutoAssign, setShowAutoAssign] = useState(false);
+  const autoAssignCandidates = useMemo(
+    () => buildAutoAssignCandidates(data.inkPlan, data.testInks, today, days, computedByInk),
+    [data.inkPlan, data.testInks, today, computedByInk],
+  );
 
   const applyAutoAssign = () => {
     if (autoAssignCandidates.length === 0) {
@@ -286,31 +393,27 @@ function InkPlanPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">잉크 생산계획</div>
-            <div className="page__meta">
-              정식 잉크 {data.inkPlan.length}종 · 테스트 잉크 <strong style={{ color: 'var(--warn-600)' }}>{testCount}종</strong> · 오늘 {dates[today]} ({today})
+            <div className="page__meta-chips">
+              <span className="page__meta-chip">정식 <strong>{data.inkPlan.length}</strong>종</span>
+              {testCount > 0 && (
+                <span className="page__meta-chip page__meta-chip--warn">양산대응 <strong>{testCount}</strong>종</span>
+              )}
+              <span className="page__meta-chip page__meta-chip--today">오늘 {dates[today]} ({today})</span>
             </div>
           </div>
           <div className="page__actions">
             <button className="btn"><Icon name="download" /> 내보내기</button>
             <button
-              className="btn"
+              className={`btn ${autoAssignCandidates.length > 0 ? 'btn--emphasis-brand' : ''}`}
               onClick={() => setShowAutoAssign(true)}
               disabled={autoAssignCandidates.length === 0}
               title={autoAssignCandidates.length === 0
                 ? `당일(${today}) 자동 배정 대상이 없어 (제조량 비어있고 필요수량 음수인 정식 잉크)`
                 : `당일(${today}) ${autoAssignCandidates.length}개 잉크 자동 배정 가능`}
-              style={autoAssignCandidates.length > 0 ? {
-                background: 'var(--brand-50)',
-                borderColor: 'var(--brand-500)',
-                color: 'var(--brand-700)',
-                fontWeight: 600,
-              } : null}
             >
               <Icon name="sparkle" size={12} /> 자동 배정
               {autoAssignCandidates.length > 0 && (
-                <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.8 }}>
-                  ({autoAssignCandidates.length})
-                </span>
+                <span className="btn--count-badge">({autoAssignCandidates.length})</span>
               )}
             </button>
           </div>
@@ -319,28 +422,18 @@ function InkPlanPage({ ctx }) {
 
       <div className="page__body">
         <Card flush>
-          <div className="toolbar">
-            <input className="input input--search" placeholder="잉크명 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
-            <Seg
-              value={dayFilter}
-              onChange={setDayFilter}
-              options={[
-                { value: 'all', label: '전체 (월~일)' },
-                { value: 'today', label: `당일 (${today})` },
-                { value: '3days', label: `3일 (${threeDays.join('·')})` },
-              ]}
-            />
-            <button
-              className={`btn btn--sm ${showTestOnly ? 'btn--primary' : ''}`}
-              onClick={() => setShowTestOnly(v => !v)}
-              title="테스트 잉크만 보기"
-              style={{ marginLeft: 4 }}
-            >
-              <Icon name="flask" size={11} /> 테스트만 ({testCount})
-            </button>
-            <div className="spacer" />
-            <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filtered.length}건</span>
-          </div>
+          <InkPlanToolbar
+            search={search}
+            setSearch={setSearch}
+            dayFilter={dayFilter}
+            setDayFilter={setDayFilter}
+            today={today}
+            threeDays={threeDays}
+            showTestOnly={showTestOnly}
+            setShowTestOnly={setShowTestOnly}
+            testCount={testCount}
+            filteredCount={filtered.length}
+          />
 
           <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 300px)' }}>
             <table className="tbl inkplan-tbl">
@@ -377,98 +470,19 @@ function InkPlanPage({ ctx }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((ink, i) => {
-                  const statusTone = ink.testStatus === '양산대응' ? 'ok' : ink.testStatus === '시양산' ? 'warn' : 'info';
-
-                  // testInks-only도 정상 row 처리 (셀 단위 분기 동일하게 적용)
-                  const usedBy = productsUsingInk.get(ink.name) || [];
-                  return (
-                    <tr key={ink.name + i} className="inkplan-row">
-                      <td className="sticky-col inkplan-namecell">
-                        <InkNameCell
-                          name={ink.name}
-                          usedBy={usedBy}
-                          testStatus={ink.testStatus}
-                          statusTone={statusTone}
-                        />
-                      </td>
-                      <td className="sticky-col-2 inkplan-machine-cell">
-                        <CellTextInput
-                          value={inkToMachine.get(ink.name) || ''}
-                          listId="ink-machine-list"
-                          onCommit={v => updateInkMachine(ink.name, v)}
-                        />
-                      </td>
-                      {visibleDays.map(d => {
-                        const dd = ink.days[d] || {};
-                        const av = dd['가용일수'];
-                        const avColor = av != null && Number(av) < 0 ? 'var(--bad-600)' : Number(av) <= 1 ? 'var(--bad-600)' : Number(av) <= 3 ? 'var(--warn-600)' : 'inherit';
-                        const isToday = d === today;
-                        const cellBg = isToday ? 'oklch(0.985 0.012 245)' : undefined;
-                        // 양산대응 시작 요일부터는 잠금
-                        const locked = ink.testStatus && days.indexOf(d) >= days.indexOf(ink.startDay || '월');
-                        const colspan = d === '월' ? 4 : 3;
-                        if (locked) {
-                          return (
-                            <td key={d} colSpan={colspan} className="inkplan-cell inkplan-cell--locked" style={{ background: cellBg }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--warn-700)' }}>
-                                <Icon name="flask" size={11} /> 양산대응
-                              </span>
-                            </td>
-                          );
-                        }
-                        // 재고 조사 연동: inv 우선 표시. 수동 수정 가능. inv 변경 시 위 useEffect가 덮어씀
-                        const invStock = inventoryByInkDay.get(ink.name)?.get(d);
-                        const stockFromInv = invStock !== undefined;
-                        const displayStock = (dd['현재고'] != null) ? dd['현재고'] : invStock;
-                        return (
-                          <React.Fragment key={d}>
-                            {/* 재고 - 항상 입력 가능. inv 데이터 있으면 청록 배경으로 구분 */}
-                            <td
-                              className="num inkplan-cell"
-                              style={{
-                                background: stockFromInv
-                                  ? (isToday ? 'oklch(0.93 0.05 200)' : 'oklch(0.96 0.03 200)')
-                                  : cellBg,
-                              }}
-                              title={stockFromInv
-                                ? '재고 조사에서 자동 입력 (Lot 합산). 수동 수정 가능 — 단 재고 조사 변경 시 그 값으로 덮어씌워짐'
-                                : ''}
-                            >
-                              <CellNumInput
-                                value={displayStock}
-                                onCommit={v => updateCell(ink.name, d, '현재고', v)}
-                              />
-                            </td>
-                            {/* 가용 - 표시만 */}
-                            <td className="num inkplan-cell inkplan-cell--readonly" style={{
-                              color: avColor,
-                              fontWeight: av != null && Number(av) <= 3 ? 600 : 400,
-                              background: cellBg,
-                            }}>
-                              {fmtNum(av)}
-                            </td>
-                            {/* 필요 (월요일만) - 표시만 */}
-                            {d === '월' && (
-                              <td className="num inkplan-cell inkplan-cell--readonly" style={{ background: cellBg }}>{fmtNum(dd['필요수량'])}</td>
-                            )}
-                            {/* 제조량 - 항상 input */}
-                            <td className="num inkplan-cell inkplan-cell--manu" style={{
-                              background: dd['제조량'] ? 'var(--brand-50)' : cellBg,
-                              color: dd['제조량'] ? 'var(--brand-700)' : 'inherit',
-                              fontWeight: dd['제조량'] ? 600 : 400,
-                            }}>
-                              <CellNumInput
-                                value={dd['제조량']}
-                                onCommit={v => updateCell(ink.name, d, '제조량', v)}
-                              />
-                            </td>
-                          </React.Fragment>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                {filtered.map((ink, i) => (
+                  <InkPlanRow
+                    key={ink.name}
+                    ink={ink}
+                    visibleDays={visibleDays}
+                    today={today}
+                    days={days}
+                    computedByInk={computedByInk}
+                    productsUsingInk={productsUsingInk}
+                    inkToMachine={inkToMachine}
+                    onUpdateCell={updateCell}
+                  />
+                ))}
                 {filtered.length === 0 && (
                   <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40 }}>조건에 맞는 잉크가 없습니다</td></tr>
                 )}
@@ -478,57 +492,21 @@ function InkPlanPage({ ctx }) {
         </Card>
 
         {showAutoAssign && (
-          <Modal
-            title={`자동 배정 미리보기 — 당일 (${today}, ${dates[today]})`}
+          <AutoAssignModal
+            today={today}
+            dates={dates}
+            candidates={autoAssignCandidates}
+            onApply={applyAutoAssign}
             onClose={() => setShowAutoAssign(false)}
-            footer={
-              <>
-                <button className="btn" onClick={() => setShowAutoAssign(false)}>취소</button>
-                <button
-                  className="btn btn--primary"
-                  onClick={applyAutoAssign}
-                  disabled={autoAssignCandidates.length === 0}
-                >
-                  <Icon name="check" size={12} /> {autoAssignCandidates.length}개 적용
-                </button>
-              </>
-            }
-          >
-            <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)', padding: 10, background: 'var(--brand-50)', borderRadius: 8 }}>
-              <Icon name="sparkle" size={12} /> 당일 제조량이 비어있고, <strong>월요일 필요수량이 음수(부족)</strong>인 정식 잉크의 빈 제조량 셀에 <strong>|필요수량|</strong> 을 채웁니다. 양산대응 잠금 셀은 제외.
-            </div>
-            {autoAssignCandidates.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-500)' }}>
-                자동 배정 대상이 없습니다.
-              </div>
-            ) : (
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>잉크</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>필요수량 (월)</th>
-                    <th style={{ width: 110, textAlign: 'right' }}>제조량 (예정)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {autoAssignCandidates.map(c => (
-                    <tr key={c.name}>
-                      <td style={{ fontWeight: 500 }}>{c.name}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--bad-600)', fontFamily: 'JetBrains Mono, monospace' }}>{c.need}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--brand-700)', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace' }}>{c.suggested}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Modal>
+          />
         )}
       </div>
     </div>
   );
 }
 
-// 잉크명 셀 — 커스텀 hover popover (body로 portal해서 sticky/overflow 클리핑 회피)
+// ── 셀 component: 잉크명 (커스텀 hover popover) ──────────────────────────────
+// body로 portal해서 sticky/overflow 클리핑 회피
 function InkNameCell({ name, usedBy, testStatus, statusTone }) {
   const [hover, setHover] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -571,11 +549,11 @@ function InkNameCell({ name, usedBy, testStatus, statusTone }) {
   );
 }
 
-// 엑셀식 항상 input 셀 — 숫자
+// ── 셀 component: 엑셀식 항상 input 셀 — 숫자 ────────────────────────────────
 // - type="text" + inputMode="decimal" 으로 spinner(화살표) 없음, 숫자만 허용
 // - Enter → 같은 컬럼의 다음 row input으로 focus 이동 (blur 자동 트리거 → commit)
 // - 값이 외부에서 바뀌면 자동 동기화
-function CellNumInput({ value, onCommit }) {
+function CellNumInput({ value, onCommit, focusCol }) {
   const [v, setV] = useState(value == null ? '' : String(value));
   useEffect(() => { setV(value == null ? '' : String(value)); }, [value]);
 
@@ -583,7 +561,6 @@ function CellNumInput({ value, onCommit }) {
     const trimmed = v.trim();
     const num = trimmed === '' ? null : Number(trimmed);
     const result = isNaN(num) ? null : num;
-    // 값이 그대로면 setData 안 부르도록 onCommit에서 처리하거나 여기서 비교
     if (result !== value) onCommit(result);
   };
 
@@ -594,16 +571,16 @@ function CellNumInput({ value, onCommit }) {
       className="inkplan-cellinp inkplan-cellinp--num"
       value={v}
       placeholder="·"
+      data-focuscol={focusCol}
       onChange={e => {
         const raw = e.target.value;
-        // 숫자/소수점/마이너스만 허용 (빈 문자열도 허용)
         if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) setV(raw);
       }}
       onBlur={commit}
       onKeyDown={e => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          focusNextCellInColumn(e.currentTarget);
+          focusNextInColumn(e.currentTarget);
         } else if (e.key === 'Escape') {
           setV(value == null ? '' : String(value));
           e.currentTarget.blur();
@@ -614,8 +591,9 @@ function CellNumInput({ value, onCommit }) {
   );
 }
 
-// 엑셀식 항상 input 셀 — 텍스트 (호기)
-function CellTextInput({ value, onCommit, listId }) {
+// ── 셀 component: 엑셀식 항상 input 셀 — 텍스트 ──────────────────────────────
+// 현재 사용처 없음. 향후 다른 자유텍스트 셀이 필요할 때 재사용 가능하도록 보존.
+function CellTextInput({ value, onCommit, listId, focusCol }) {
   const [v, setV] = useState(value || '');
   useEffect(() => { setV(value || ''); }, [value]);
 
@@ -631,12 +609,13 @@ function CellTextInput({ value, onCommit, listId }) {
       className="inkplan-cellinp inkplan-cellinp--text"
       value={v}
       placeholder="·"
+      data-focuscol={focusCol}
       onChange={e => setV(e.target.value)}
       onBlur={commit}
       onKeyDown={e => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          focusNextCellInColumn(e.currentTarget);
+          focusNextInColumn(e.currentTarget);
         } else if (e.key === 'Escape') {
           setV(value || '');
           e.currentTarget.blur();
@@ -644,6 +623,28 @@ function CellTextInput({ value, onCommit, listId }) {
       }}
       onFocus={e => e.currentTarget.select()}
     />
+  );
+}
+
+// ── 셀 component: 호기 표시 전용 ─────────────────────────────────────────────
+// 잉크 마스터(잉크 추가 및 관리)에서만 편집 가능 — 여기서는 표시만
+function InkMachineReadonly({ machine }) {
+  if (!machine) {
+    return (
+      <span
+        style={{ color: 'var(--ink-400)', fontSize: 11, cursor: 'help' }}
+        title="잉크 추가 및 관리 페이지에서 호기를 지정하세요"
+      >호기 미지정</span>
+    );
+  }
+  return (
+    <span
+      className="tag"
+      style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'help' }}
+      title="호기는 잉크 추가 및 관리 페이지에서만 변경할 수 있습니다"
+    >
+      {machine}
+    </span>
   );
 }
 

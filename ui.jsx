@@ -1,9 +1,10 @@
 // Shared UI primitives + icons (global window scope for cross-file React access)
 
-const Icon = ({ name, size = 16 }) => {
-  const stroke = 'currentColor';
-  const sw = 1.8;
-  const paths = {
+// 모듈 스코프 상수 — Icon 렌더마다 paths 객체(+JSX 30종)가 재생성되지 않도록 호이스팅
+const ICON_STROKE = 'currentColor';
+const ICON_PATHS = (() => {
+  const stroke = ICON_STROKE;
+  return {
     dashboard: <><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></>,
     injection: <><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><circle cx="7" cy="7" r="1" fill={stroke}/><circle cx="7" cy="17" r="1" fill={stroke}/></>,
     ink: <><path d="M12 3v6"/><path d="M8 9h8l-1 11H9z"/><path d="M10 13h4"/></>,
@@ -33,13 +34,15 @@ const Icon = ({ name, size = 16 }) => {
     beaker: <><path d="M9 3h6v5l4 9a2 2 0 0 1-1.8 2.8H6.8A2 2 0 0 1 5 16.9L9 8V3z"/><path d="M8 3h8"/><path d="M7 12h10"/></>,
     lock: <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
     flask: <><path d="M10 2v6L5 18a2 2 0 0 0 1.8 2.8h10.4A2 2 0 0 0 19 18l-5-10V2"/><path d="M8 2h8"/></>,
+    history: <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></>,
   };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      {paths[name] || null}
-    </svg>
-  );
-};
+})();
+
+const Icon = ({ name, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={ICON_STROKE} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    {ICON_PATHS[name] || null}
+  </svg>
+);
 
 const Pill = ({ tone = 'default', children, dot = false }) => (
   <span className={`pill ${tone === 'default' ? '' : 'pill--' + tone}`}>
@@ -87,36 +90,17 @@ const Seg = ({ value, onChange, options }) => (
   </div>
 );
 
-// ── Product name matching (OCR → master) ────────────────────────────────────
-// IRMS의 product_matcher.py를 JS로 포팅. normalize → exact → token Jaccard.
+// ── Product name normalization (OCR ↔ master 비교용) ─────────────────────────
 
+// 본체는 data-service.js 로 이전. 기존 글로벌 호출부 호환을 위한 위임 래퍼.
 function normalizeProductName(name) {
-  if (!name) return '';
-  // NFC + 대문자 + 공백/특수문자 제거
-  let s = String(name).normalize('NFC').trim().toUpperCase();
-  s = s.replace(/[_\-\s/\\()（）\[\]【】·・.,，]+/g, '');
-  s = s.replace(/[^\w가-힣%]/g, '');
-  return s;
-}
-
-function tokenizeProductName(name) {
-  if (!name) return new Set();
-  const s = String(name).trim().toUpperCase();
-  // 영문 연속, 한글 연속, 숫자(소수점 포함)
-  const tokens = s.match(/[A-Z]+|[가-힣]+|\d+(?:\.\d+)?/g) || [];
-  return new Set(tokens.filter(t => t.length >= 2 || /^\d/.test(t)));
-}
-
-function tokenJaccard(a, b) {
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const t of a) if (b.has(t)) inter++;
-  return inter / (a.size + b.size - inter);
+  return DataService.normalizeProductName(name);
 }
 
 // ── 공통 상수 ───────────────────────────────────────
-const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
-const WEEKDAYS_PLUS = ['월', '화', '수', '목', '금', '토', '일', '차주월'];
+// 요일/교대 상수의 단일 출처는 data-service.js. 기존 글로벌 호출부 호환 위해 위임 참조.
+const WEEKDAYS = DataService.WEEKDAYS;
+const WEEKDAYS_PLUS = DataService.WEEKDAYS_PLUS;
 const INK_DAY_FIELDS = ['현재고', '가용일수', '필요수량', '제조량'];
 
 // ── 공통 헬퍼 ───────────────────────────────────────
@@ -128,12 +112,9 @@ function padInks3(arr) {
   return v.map(x => (x == null || x === '' ? null : x));
 }
 
-// 한국어 요일을 ISO 날짜에서 자동 계산 ('월'~'일'). 잘못된 입력 시 default 반환.
+// 한국어 요일을 ISO 날짜에서 자동 계산 ('월'~'일'). 본체는 data-service.js (위임).
 function dayFromDate(iso, fallback = '월') {
-  if (!iso) return fallback;
-  const d = new Date(iso);
-  if (isNaN(d)) return fallback;
-  return ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+  return DataService.dayFromDate(iso, fallback);
 }
 
 // 제품의 채워진 잉크들 (null 제외)
@@ -141,102 +122,20 @@ function productInks(product) {
   return (product?.inks || []).filter(Boolean);
 }
 
-// machineAssignments record에서 잉크명 추출 (구버전 호환)
+// machineAssignments record에서 잉크명 추출 (구버전 호환). 본체는 data-service.js (위임).
 function inkOfAssignment(a) {
-  return a?.ink || a?.product || a?.name || '';
+  return DataService.inkOfAssignment(a);
 }
 
-// 시스템 날짜에서 "이번 주" 정보 계산.
-//   - today: 한국어 요일 ('월'~'일') — 토/일이면 그 자체
-//   - dates: { '월': '5/12', '화': '5/13', ..., '일': '5/18', '차주월': '5/19' }
+// 시스템 날짜에서 "이번 주" 정보 계산. 본체는 data-service.js (위임).
+//   반환: { today:'월'~'일', dates:{요일→'M/D', 차주월}, isoLabel:'YYYY-Www', monthWeekLabel:'n월 n주차' }
 function getWeekInfo(now = new Date()) {
-  const DAY_BY_IDX = ['일', '월', '화', '수', '목', '금', '토'];
-  const days = ['월', '화', '수', '목', '금', '토', '일'];
-  const todayName = DAY_BY_IDX[now.getDay()];
-  // 월요일까지 며칠 빼야 하는가 (일=6, 월=0, 화=1, …, 토=5)
-  const offsetToMonday = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(now.getDate() - offsetToMonday);
-  const dates = {};
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    dates[days[i]] = `${d.getMonth() + 1}/${d.getDate()}`;
-  }
-  const nextMon = new Date(monday);
-  nextMon.setDate(monday.getDate() + 7);
-  dates['차주월'] = `${nextMon.getMonth() + 1}/${nextMon.getDate()}`;
-  return { today: todayName, dates };
+  return DataService.getWeekInfo(now);
 }
 
-// OCR brand "PIA / 액상" → "PIA" 같이 정규화 (슬래시 앞부분만, 대문자)
+// OCR brand "PIA / 액상" → "PIA" 정규화. 본체는 data-service.js (위임).
 function normalizeBrand(brand) {
-  if (!brand) return '';
-  return String(brand).split('/')[0].trim().toUpperCase();
-}
-
-// products: [{ name, brand, inks }] 객체 배열
-// ocrBrand: OCR이 추출한 브랜드 (선택)
-// returns { matchedName, confidence, status, candidates[{name, brand, score, brandMatch}] }
-//   status: 'exact' | 'fuzzy' | 'none'
-//   같은 브랜드 후보가 우선 정렬됨. 브랜드 일치 시 점수 가산, 불일치 시 페널티.
-function matchProduct(ocrName, ocrBrand, products, { threshold = 0.25, topN = 5 } = {}) {
-  const result = { ocrName, ocrBrand, matchedName: null, confidence: 0, status: 'none', candidates: [] };
-  const normOcr = normalizeProductName(ocrName);
-  if (!normOcr) return result;
-
-  const normOcrBrand = normalizeBrand(ocrBrand);
-
-  // 호환성: products가 string[] 으로 들어오면 [{name}] 으로 변환
-  const items = products.map(p => typeof p === 'string' ? { name: p, brand: '' } : p);
-
-  // Pass 1: exact normalized match — 정확 이름 일치 시, 같은 브랜드가 있으면 그걸 우선
-  const exactMatches = items.filter(p => normalizeProductName(p.name) === normOcr);
-  if (exactMatches.length > 0) {
-    const sameBrand = normOcrBrand
-      ? exactMatches.find(p => normalizeBrand(p.brand) === normOcrBrand)
-      : null;
-    const picked = sameBrand || exactMatches[0];
-    result.matchedName = picked.name;
-    result.confidence = 1;
-    result.status = 'exact';
-    return result;
-  }
-
-  // Pass 2: token Jaccard + 브랜드 가중
-  const ocrTokens = tokenizeProductName(ocrName);
-  const scored = [];
-  for (const p of items) {
-    const tokens = tokenizeProductName(p.name);
-    let base = tokenJaccard(ocrTokens, tokens);
-    const brandMatch = !!(normOcrBrand && p.brand && normalizeBrand(p.brand) === normOcrBrand);
-    const brandKnown = !!(normOcrBrand && p.brand);
-    let score = base;
-    if (brandMatch) score = Math.min(1, base + 0.15);          // 같은 브랜드 가산
-    else if (brandKnown) score = base * 0.6;                    // 다른 브랜드 페널티
-    if (score >= threshold) {
-      scored.push({
-        name: p.name,
-        brand: p.brand || '',
-        score: Math.round(score * 1000) / 1000,
-        brandMatch,
-      });
-    }
-  }
-  // 같은 브랜드 우선 → 점수 내림차순
-  scored.sort((a, b) => {
-    if (a.brandMatch !== b.brandMatch) return a.brandMatch ? -1 : 1;
-    return b.score - a.score;
-  });
-
-  if (scored.length > 0) {
-    result.matchedName = scored[0].name;
-    result.confidence = scored[0].score;
-    result.status = 'fuzzy';
-    result.candidates = scored.slice(0, topN);
-  }
-  return result;
+  return DataService.normalizeBrand(brand);
 }
 
 // CascadePicker — 브랜드 → 제품 (→ 선택적으로 잉크) 단계별 선택
@@ -258,42 +157,36 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
 
   const [brand, setBrand] = React.useState(initBrand);
   const [productName, setProductName] = React.useState('');
+  const [productId, setProductId] = React.useState(null);
   const [brandSearch, setBrandSearch] = React.useState('');
   const [productSearch, setProductSearch] = React.useState('');
 
-  const brands = React.useMemo(() => {
-    const s = new Set();
-    for (const p of products) if (p.brand) s.add(p.brand);
-    return Array.from(s).sort();
-  }, [products]);
+  // 파생 로직은 DataService 순수 함수에 위임 (단위 테스트 대상)
+  const brands = React.useMemo(() => DataService.buildCascadeBrands(products), [products]);
 
-  const productsInBrand = React.useMemo(() => {
-    if (!brand) return [];
-    return products.filter(p => p.brand === brand);
-  }, [brand, products]);
+  const productsInBrand = React.useMemo(() => DataService.cascadeProductsInBrand(products, brand), [brand, products]);
 
+  // 잉크 컬럼: 동명 제품이면 이름만으로는 다른 제품 잉크가 뜬다 — 선택된 id로 정확히 해소.
   const inksInProduct = React.useMemo(() => {
-    if (!productName) return [];
-    const p = products.find(x => x.name === productName);
-    return (p?.inks || []).filter(Boolean);
-  }, [productName, products]);
+    if (productId) {
+      const p = (products || []).find(x => x.id === productId);
+      if (p) return (p.inks || []).filter(Boolean);
+    }
+    return DataService.cascadeInksInProduct(products, productName);
+  }, [productId, productName, products]);
 
-  const visibleBrands = React.useMemo(() => {
-    const q = brandSearch.trim().toLowerCase();
-    return q ? brands.filter(b => b.toLowerCase().includes(q)) : brands;
-  }, [brands, brandSearch]);
+  const visibleBrands = React.useMemo(() => DataService.filterByQuery(brands, brandSearch, b => b), [brands, brandSearch]);
 
-  const visibleProducts = React.useMemo(() => {
-    const q = productSearch.trim().toLowerCase();
-    return q ? productsInBrand.filter(p => p.name.toLowerCase().includes(q)) : productsInBrand;
-  }, [productsInBrand, productSearch]);
+  const visibleProducts = React.useMemo(() => DataService.filterByQuery(productsInBrand, productSearch, p => p.name), [productsInBrand, productSearch]);
 
   const pickProduct = (p) => {
     if (mode === 'product') {
-      onSelect(p.name);
+      // 제품 객체를 함께 전달 — 호출부가 동명 구분용 id를 캡처할 수 있게 한다.
+      onSelect(p.name, p);
       onClose?.();
     } else {
       setProductName(p.name);
+      setProductId(p.id || null);
     }
   };
 
@@ -328,7 +221,7 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
             <button
               key={b}
               className={`cascade-item ${brand === b ? 'cascade-item--active' : ''}`}
-              onClick={() => { setBrand(b); setProductName(''); setProductSearch(''); }}
+              onClick={() => { setBrand(b); setProductName(''); setProductId(null); setProductSearch(''); }}
             >
               {b}
             </button>
@@ -355,10 +248,10 @@ function CascadePicker({ products, mode = 'product', onSelect, currentValue, onC
             <div className="cascade-list">
               {visibleProducts.map(p => {
                 const inkCount = (p.inks || []).filter(Boolean).length;
-                const isActive = mode === 'ink' && productName === p.name;
+                const isActive = mode === 'ink' && (productId ? productId === p.id : productName === p.name);
                 return (
                   <button
-                    key={p.name}
+                    key={p.id || p.name}
                     className={`cascade-item ${isActive ? 'cascade-item--active' : ''}`}
                     onClick={() => pickProduct(p)}
                   >
@@ -438,4 +331,19 @@ const fmtNum = (v) => {
   return n.toLocaleString();
 };
 
-Object.assign(window, { Icon, Pill, Card, Modal, Toast, Seg, stockStatus, heatLevel, fmtNum });
+// Enter 시 같은 컬럼(data-focuscol)의 다음 input 으로 포커스 이동 — ink-plan/inventory 공용.
+// td 위치 인덱스 순회 대신 명시적 컬럼 키 + 문서 순서를 쓰므로 colSpan·래퍼·
+// 중간 행(합계/relabel 등) 마크업 변화에 영향을 받지 않는다.
+// 같은 셀에 input 이 여럿이면(재고 lot) 문서 순서상 셀 내부 → 다음 행 순으로 자연 이동.
+function focusNextInColumn(input) {
+  const col = input && input.dataset ? input.dataset.focuscol : null;
+  if (!col) { if (input) input.blur(); return; }
+  const scope = input.closest('table') || document;
+  const candidates = Array.from(
+    scope.querySelectorAll(`input[data-focuscol="${CSS.escape(col)}"]`)
+  ).filter(el => !el.disabled);
+  const next = candidates[candidates.indexOf(input) + 1];
+  if (next) { next.focus(); next.select(); } else { input.blur(); }
+}
+
+Object.assign(window, { Icon, Pill, Card, Modal, Toast, Seg, stockStatus, heatLevel, fmtNum, focusNextInColumn });
