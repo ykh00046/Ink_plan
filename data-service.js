@@ -389,6 +389,12 @@
     return { errorCount, notInMaster, noInks, show, tooltip };
   }
 
+  // 주간 스냅샷 목록에 해당 주차가 이미 마감(적재)돼 있는지. 마감 유도 표시의 단일 출처.
+  function isWeekArchived(snapshots, week) {
+    if (!week) return false;
+    return (snapshots || []).some(s => s && s.week === week);
+  }
+
   // 마스터 규모·활용 인사이트(순수·read-only). 경보가 아니라 현황 통계 — 알람 피로 없이
   // 비대한 잉크 마스터(등록 다수·실사용 소수)를 한눈에. data===null 안전.
   function buildMasterStats(data) {
@@ -1906,6 +1912,7 @@
     lintMasters,
     buildMasterHealthBadge,
     buildMasterStats,
+    isWeekArchived,
     collectInkShortage,
     collectInkDepletionRisks,
     buildInkPlanningAlerts,

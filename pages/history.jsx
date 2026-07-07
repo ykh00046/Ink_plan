@@ -63,6 +63,10 @@ function HistoryPage({ ctx }) {
   const reloadAll = () => { loadBackups(); loadSnapshots(); };
   useEffect(() => { reloadAll(); }, []);
 
+  // 이번 주 마감 여부 — 안 쓰면 History가 비니, 마감을 유도하는 상태 표시.
+  const thisWeek = useMemo(() => DataService.getWeekInfo().isoLabel, []);
+  const weekClosed = DataService.isWeekArchived(snapshots, thisWeek);
+
   // 이번 주 마감 — 현재 data를 그 주 ISO 라벨로 스냅샷 적재(멱등). History·추세의 기록.
   const closeWeek = () => {
     const label = DataService.getWeekInfo().isoLabel;
@@ -169,8 +173,17 @@ function HistoryPage({ ctx }) {
             <div className="page__meta">주간 마감·백업 시점의 사출계획, 잉크 생산계획, 재고 조사 내용을 현재 데이터와 비교</div>
           </div>
           <div className="page__actions">
+            <span
+              className="page__meta-chip"
+              style={weekClosed
+                ? { background: 'var(--ok-100, #dcfce7)', color: 'var(--ok-700, #15803d)' }
+                : { background: 'var(--warn-100)', color: 'var(--warn-700)' }}
+              title={weekClosed ? '이번 주가 스냅샷으로 보관됨' : '이번 주가 아직 보관되지 않음 — 마감하면 나중에 이 주를 그대로 조회할 수 있습니다'}
+            >
+              이번 주 {thisWeek} · {weekClosed ? '마감됨 ✓' : '미마감'}
+            </span>
             <button className="btn btn--primary" onClick={closeWeek} disabled={closing} title="이번 주 계획·재고를 주차 라벨로 영구 보관(재마감 시 덮어씀)">
-              <Icon name="save" size={12} /> {closing ? '저장 중…' : '이번 주 마감'}
+              <Icon name="save" size={12} /> {closing ? '저장 중…' : (weekClosed ? '이번 주 재마감' : '이번 주 마감')}
             </button>
             <button className="btn" onClick={reloadAll}><Icon name="refresh" size={12} /> 새로고침</button>
           </div>

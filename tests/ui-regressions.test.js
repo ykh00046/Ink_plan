@@ -150,6 +150,7 @@ test('weekly snapshot: history page is wired to close + list + read APIs', () =>
   assert.match(history, /\/api\/snapshot\?week=/);                    // 주차 읽기
   assert.match(history, /isWeekLabel/);                               // 주차 라벨 분기
   assert.match(history, /getWeekInfo\(\)\.isoLabel/);                 // 현재 주차 라벨
+  assert.match(history, /isWeekArchived/);                            // 이번 주 마감 상태 표시
 });
 
 test('depletion alert is wired to global navigation and dashboard', () => {
