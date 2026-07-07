@@ -21,6 +21,9 @@ from storage import (
     restore_backup,
     prune_backups,
     read_audit,
+    write_week_snapshot,
+    list_week_snapshots,
+    read_week_snapshot,
 )
 from settings_store import read_settings, write_settings
 
@@ -173,6 +176,19 @@ class Handler(SimpleHTTPRequestHandler):
             entries = read_audit()
             self.send_json(list(reversed(entries))[:limit])
             return
+        if path == "/api/snapshots":
+            # 주간 마감 스냅샷 목록(최신순) — History 조회 진입점.
+            self.send_json(list_week_snapshots())
+            return
+        if path == "/api/snapshot":
+            week = (parse_qs(parsed.query).get("week") or [""])[0]
+            try:
+                self.send_json(read_week_snapshot(week))
+            except ValueError:
+                self.send_json({"error": "bad week"}, 400)
+            except FileNotFoundError:
+                self.send_json({"error": "snapshot not found"}, 404)
+            return
         if path == "/api/settings":
             self.send_json(read_settings())
             return
@@ -223,6 +239,17 @@ class Handler(SimpleHTTPRequestHandler):
                 target = create_backup("manual")
                 prune_backups()
                 self.send_json({"ok": True, "name": target.name})
+                return
+            if self.path == "/api/snapshot":
+                # 주간 마감 스냅샷 적재 — body {week, data?}. data 없으면 현재 DB.
+                body = self.read_body_json() or {}
+                week = body.get("week")
+                try:
+                    label, _ = write_week_snapshot(week, body.get("data"))
+                except ValueError:
+                    self.send_json({"error": "bad week"}, 400)
+                    return
+                self.send_json({"ok": True, "week": label})
                 return
             if self.path == "/api/restore":
                 data = self.read_body_json() or {}

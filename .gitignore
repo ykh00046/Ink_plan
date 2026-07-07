@@ -22,3 +22,4 @@ data/settings.json
 .pytest-tmp/
 .pytest_tmp/
 .tmp/
+data/archive/

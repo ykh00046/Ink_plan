@@ -28,9 +28,15 @@ BACKUP_DIR = DATA_DIR / "backups"
 SEED_FILE = ASSET_ROOT / "data" / "clean.json"
 CURRENT_FILE = DB_DIR / "current.json"
 AUDIT_FILE = DB_DIR / "audit.json"
+# 주간 마감 스냅샷 아카이브 — ISO 주차(YYYY-Www)별 불변 스냅샷. History·추세의 기반.
+# data/ 트리 하위라 정적 노출은 이미 차단됨(/api/* 로만 접근).
+ARCHIVE_DIR = DATA_DIR / "archive"
 # 감사 로그 추적 대상 — 생산계획 핵심 3개 도메인 (그 외 필드 변경은 잡음으로 제외)
 AUDIT_DOMAINS = ("injection", "products", "machineAssignments")
 _LOCK = threading.RLock()
+
+import re as _re
+_WEEK_RE = _re.compile(r"^\d{4}-W\d{2}$")   # 'YYYY-Www' (getWeekInfo().isoLabel 규약)
 
 
 def ensure_dirs():
@@ -264,6 +270,52 @@ def restore_backup(name):
         create_backup("before_restore")
         shutil.copy2(source, CURRENT_FILE)
         return source
+
+
+# ── 주간 마감 스냅샷 아카이브 (History·추세 기반, Phase 2) ──────────────────────
+# 주간 마감 시 그 주 계획/재고를 불변 스냅샷으로 적재한다. 감사로그 replay 없이
+# 과거 주를 통째로 재현(History) + 소비추세 입력 확보. ISO 주차(YYYY-Www) 키로 멱등
+# (같은 주 재마감은 덮어씀). 전체 스냅샷 저장 — 소규모 데이터라 단순·정확이 우선.
+
+def _week_path(week_label):
+    label = str(week_label or "").strip()
+    if not _WEEK_RE.match(label):
+        raise ValueError(f"invalid week label: {week_label!r} (expected YYYY-Www)")
+    # 정규식이 구분자를 배제하므로 경로 traversal 불가하지만, 방어적으로 name 만 사용.
+    return ARCHIVE_DIR / f"{Path(label).name}.json"
+
+
+def write_week_snapshot(week_label, data=None):
+    """그 주 스냅샷 적재(멱등). data 미지정 시 현재 DB. 반환: (week_label, path)."""
+    with _LOCK:
+        path = _week_path(week_label)   # 라벨 검증 먼저
+        snapshot = data if data is not None else read_current()
+        write_json_atomic(path, snapshot)
+        return week_label, path
+
+
+def list_week_snapshots():
+    """적재된 주간 스냅샷 목록 — [{week, size, mtime}] 주차 내림차순(최신 먼저)."""
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for p in ARCHIVE_DIR.glob("*.json"):
+        week = p.stem
+        if not _WEEK_RE.match(week):
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue  # 조회 중 삭제(TOCTOU) 건너뜀
+        out.append({"week": week, "size": st.st_size, "mtime": st.st_mtime})
+    out.sort(key=lambda e: e["week"], reverse=True)  # 'YYYY-Www' 문자열 정렬=시간순
+    return out
+
+
+def read_week_snapshot(week_label):
+    path = _week_path(week_label)
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return read_json(path)
 
 
 def prune_backups(keep=90, keep_startup=20):
