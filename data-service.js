@@ -395,6 +395,44 @@
     return (snapshots || []).some(s => s && s.week === week);
   }
 
+  // 그 주 잉크별 소요(=소비 근사) 요약 — 마감 시 스냅샷과 함께 적재해 추세의 입력이 된다.
+  // 전체 스냅샷을 매번 다시 읽지 않도록 가벼운 { byInk: {잉크: 주간총소요} } 로 압축.
+  function buildWeeklyInkSummary(data) {
+    const d = data || {};
+    const lookup = buildProductLookup(d.products);
+    const demand = buildDemandByInkDay(d.injection, lookup);   // Map<ink, Map<day,count>>
+    const byInk = {};
+    for (const [ink, byDay] of demand) {
+      let total = 0;
+      for (const c of byDay.values()) total += c;
+      if (total > 0) byInk[ink] = total;
+    }
+    return { byInk };
+  }
+
+  // 주별 요약 맵({ 'YYYY-Www': {byInk} }) → 잉크 × 주차 추세.
+  // 반환: { weeks: [정렬된 주차], inks: [{ ink, points:[주별 총소요], sum, activeWeeks }] } (sum desc).
+  function buildInkConsumptionTrend(summariesByWeek) {
+    const map = summariesByWeek || {};
+    const weeks = Object.keys(map)
+      .filter(w => /^\d{4}-W\d{2}$/.test(w))
+      .sort();                                    // 'YYYY-Www' 문자열 정렬 = 시간순
+    const inkSet = new Set();
+    for (const w of weeks) {
+      const byInk = (map[w] && map[w].byInk) || {};
+      for (const ink of Object.keys(byInk)) inkSet.add(ink);
+    }
+    const inks = [];
+    for (const ink of inkSet) {
+      const points = weeks.map(w => Number(((map[w] && map[w].byInk) || {})[ink] || 0));
+      const sum = points.reduce((a, b) => a + b, 0);
+      const activeWeeks = points.filter(p => p > 0).length;
+      inks.push({ ink, points, sum, activeWeeks });
+    }
+    inks.sort((a, b) => b.sum - a.sum || a.ink.localeCompare(b.ink));
+    return { weeks, inks };
+  }
+
   // 마스터 규모·활용 인사이트(순수·read-only). 경보가 아니라 현황 통계 — 알람 피로 없이
   // 비대한 잉크 마스터(등록 다수·실사용 소수)를 한눈에. data===null 안전.
   function buildMasterStats(data) {
@@ -1913,6 +1951,8 @@
     buildMasterHealthBadge,
     buildMasterStats,
     isWeekArchived,
+    buildWeeklyInkSummary,
+    buildInkConsumptionTrend,
     collectInkShortage,
     collectInkDepletionRisks,
     buildInkPlanningAlerts,

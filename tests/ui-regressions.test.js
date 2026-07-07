@@ -151,6 +151,9 @@ test('weekly snapshot: history page is wired to close + list + read APIs', () =>
   assert.match(history, /isWeekLabel/);                               // 주차 라벨 분기
   assert.match(history, /getWeekInfo\(\)\.isoLabel/);                 // 현재 주차 라벨
   assert.match(history, /isWeekArchived/);                            // 이번 주 마감 상태 표시
+  assert.match(history, /buildWeeklyInkSummary/);                      // 마감 시 소비 요약 적재
+  assert.match(history, /\/api\/snapshot-summaries/);                 // 추세 로드
+  assert.match(history, /buildInkConsumptionTrend/);                   // 추세 계산
 });
 
 test('depletion alert is wired to global navigation and dashboard', () => {

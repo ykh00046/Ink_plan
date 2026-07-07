@@ -534,6 +534,49 @@ test('isWeekArchived: 스냅샷 목록에서 해당 주차 존재 여부', () =>
   assert.equal(DataService.isWeekArchived(snaps, ''), false);
 });
 
+// ── buildWeeklyInkSummary / buildInkConsumptionTrend (소비 추세) ─────────────
+
+test('buildWeeklyInkSummary: 잉크별 주간 총소요 압축', () => {
+  const data = {
+    products: [{ id: 'p_1', name: 'PROD', inks: ['INK1', 'INK2'] }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: {
+        월: { day: { name: 'PROD', id: 'p_1' }, night: 'PROD' },   // 수요 2
+        화: { day: 'PROD' },                                        // 수요 1
+      } }],
+    },
+  };
+  const s = DataService.buildWeeklyInkSummary(data);
+  assert.deepEqual(s.byInk, { INK1: 3, INK2: 3 });   // 3셀 × 각 잉크
+});
+
+test('buildWeeklyInkSummary: 빈/수요없음은 빈 byInk', () => {
+  assert.deepEqual(DataService.buildWeeklyInkSummary(null).byInk, {});
+  assert.deepEqual(DataService.buildWeeklyInkSummary({ products: [], injection: {} }).byInk, {});
+});
+
+test('buildInkConsumptionTrend: 주차 정렬 + 잉크 시계열(합계 desc)', () => {
+  const summaries = {
+    '2026-W27': { byInk: { INK1: 5, INK2: 2 } },
+    '2026-W28': { byInk: { INK1: 3, INK3: 9 } },
+    'garbage':  { byInk: { X: 1 } },   // 주차 형식 아님 → 무시
+  };
+  const t = DataService.buildInkConsumptionTrend(summaries);
+  assert.deepEqual(t.weeks, ['2026-W27', '2026-W28']);
+  const byInk = new Map(t.inks.map(i => [i.ink, i]));
+  assert.deepEqual(byInk.get('INK1').points, [5, 3]);   // 주차순 정렬
+  assert.equal(byInk.get('INK1').sum, 8);
+  assert.deepEqual(byInk.get('INK3').points, [0, 9]);   // W27엔 없음 → 0
+  assert.equal(byInk.get('INK3').activeWeeks, 1);
+  assert.deepEqual(t.inks.map(i => i.ink), ['INK3', 'INK1', 'INK2']);  // sum 9,8,2
+});
+
+test('buildInkConsumptionTrend: 빈 입력은 빈 결과', () => {
+  const t = DataService.buildInkConsumptionTrend({});
+  assert.deepEqual(t.weeks, []);
+  assert.deepEqual(t.inks, []);
+});
+
 // ── buildMasterStats (마스터 현황 인사이트, 경보 아님) ──────────────────────
 
 test('buildMasterStats: null/빈 데이터는 전부 0 (안전)', () => {
