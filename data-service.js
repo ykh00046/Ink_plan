@@ -1866,6 +1866,7 @@
     buildInkShortageBadge,
     buildInkDepletionBadge,
     buildDashboardSummary,
+    lotPrefix,
     lotSequenceForDate,
     nextInventoryLotNo,
     dateFromLotNo,

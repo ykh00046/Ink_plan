@@ -162,6 +162,19 @@ test('buildInventoryByInkDay: lots/daily 없으면 빈 맵', () => {
   assert.equal(DataService.buildInventoryByInkDay({ lots: [] }, {}).size, 0);
 });
 
+test('lotPrefix: 비영숫자(공백·하이픈·한글) 제거 후 4자 — matchInk/생성 단일 규칙', () => {
+  assert.equal(DataService.lotPrefix('U-A Blue'), 'UABL');
+  assert.equal(DataService.lotPrefix('SHADOW'), 'SHAD');
+  assert.equal(DataService.lotPrefix('ab12cd'), 'AB12');
+  // 영숫자 없는 이름(한글 전용)은 빈 prefix — matchInk가 이를 걸러 오매칭 방지
+  assert.equal(DataService.lotPrefix('빨강'), '');
+  assert.equal(DataService.lotPrefix(''), '');
+  assert.equal(DataService.lotPrefix(null), '');
+  // 생성 LOT 번호가 같은 prefix로 시작함을 교차 확인 (matchInk startsWith 대상)
+  const lotNo = DataService.nextInventoryLotNo('U-A Blue', '2026-05-10', []);
+  assert.ok(lotNo.startsWith(DataService.lotPrefix('U-A Blue')));
+});
+
 test('buildInventoryByInkDay: 같은 M/D 다른 연도면 최신 조사만 채택(연도 모호성 제거)', () => {
   const inventory = {
     lots: [{ id: 'L1', ink: '빨강' }],

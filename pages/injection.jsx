@@ -192,7 +192,7 @@ function InjectionPage({ ctx }) {
   // 마스터 알림 (이 층 + 모든 층 합산)
   const masterAlerts = useMemo(() => {
     const unregistered = new Map(); // name → [floor, machine, day, shift][]
-    const noInks = new Map();
+    const noInks = new Map();       // name → { product(id-해소), occurs[] }
     for (const fl of Object.keys(data.injection || {})) {
       for (const m of data.injection[fl]) {
         for (const [d, sh] of Object.entries(m.schedule || {})) {
@@ -200,13 +200,15 @@ function InjectionPage({ ctx }) {
             const v = sh[sk];
             const name = cellName(v);
             if (!name || isTestValue(v)) continue;
-            const p = resolveProduct(v);
+            const p = resolveProduct(v);   // 원본 셀(id 포함)로 정밀 해소
             if (!p) {
               if (!unregistered.has(name)) unregistered.set(name, []);
               unregistered.get(name).push({ fl, machine: m.machine, d, sk });
             } else if (!(p.inks || []).filter(Boolean).length) {
-              if (!noInks.has(name)) noInks.set(name, []);
-              noInks.get(name).push({ fl, machine: m.machine, d, sk });
+              // 동명 제품 중 잉크가 빈 바로 그 제품을 편집하도록 product 보관
+              // (이름만으로 재해소하면 잉크 있는 형제를 편집할 수 있음).
+              if (!noInks.has(name)) noInks.set(name, { product: p, occurs: [] });
+              noInks.get(name).occurs.push({ fl, machine: m.machine, d, sk });
             }
           }
         }
@@ -434,18 +436,18 @@ function InjectionPage({ ctx }) {
                   ⚠ 잉크가 비어있는 제품 ({masterAlerts.noInks.size})
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {Array.from(masterAlerts.noInks.entries()).map(([name, occurs]) => (
+                  {Array.from(masterAlerts.noInks.entries()).map(([name, entry]) => (
                     <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--warn-50)', borderRadius: 6, border: '1px solid var(--warn-200)' }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 500, fontSize: 13 }}>{name}</div>
                         <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>
-                          {occurs.length}곳 사용 — 브랜드: {resolveProduct(name)?.brand || '미지정'}
+                          {entry.occurs.length}곳 사용 — 브랜드: {entry.product?.brand || '미지정'}
                         </div>
                       </div>
                       <button
                         className="btn btn--sm btn--primary"
                         onClick={() => {
-                          setEditingMaster({ mode: 'edit', product: resolveProduct(name) });
+                          setEditingMaster({ mode: 'edit', product: entry.product });
                           setShowAlertList(false);
                         }}
                       >

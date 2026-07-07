@@ -529,14 +529,18 @@ function InventoryPage({ ctx }) {
   }, [data.inventory, today]);
 
   // ── Lot prefix 자동 매칭 ──
+  // 생성(DataService.lotPrefix)과 동일 규칙으로 prefix 산출 — 비영숫자(공백·하이픈·한글)
+  // 제거. 이전엔 raw slice(0,4)라 "U-A Blue"·한글 잉크의 생성 LOT을 되레 못 찾았다.
+  // 빈 prefix(영숫자 없는 이름)는 startsWith('')로 아무 LOT에나 매치되므로 제외.
+  // 더 긴(구체적) prefix 우선 — 같은 4자 prefix 충돌은 이름순으로 결정적 처리.
   const matchInk = (lotNo) => {
     if (!lotNo) return null;
     const upper = lotNo.toUpperCase().trim();
-    const sorted = [...inkNames].sort((a, b) =>
-      Math.min(b.length, 4) - Math.min(a.length, 4)
-    );
-    for (const ink of sorted) {
-      const prefix = ink.toUpperCase().slice(0, 4);
+    const candidates = inkNames
+      .map(ink => ({ ink, prefix: DataService.lotPrefix(ink) }))
+      .filter(c => c.prefix)
+      .sort((a, b) => b.prefix.length - a.prefix.length || a.ink.localeCompare(b.ink));
+    for (const { ink, prefix } of candidates) {
       if (upper.startsWith(prefix)) return ink;
     }
     return null;
