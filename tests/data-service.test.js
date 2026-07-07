@@ -203,6 +203,54 @@ test('aggregateChemicalRequest: 차주월 키도 days에 넣으면 집계됨', (
   assert.equal(withNext.rows[0].total, 3);
 });
 
+test('aggregateChemicalRequest: {name,id} 객체 셀도 집계 — id-셀 도입 회귀', () => {
+  // 수동 셀 편집·OCR 머지가 {name,id} 객체를 저장하므로 문자열 셀과 동일하게 집계돼야 함.
+  // (이전엔 name 키 Map 미스로 수요가 통째로 누락 → 약품요청서 발주 부족)
+  const data = {
+    products: [{ id: 'p_00001', name: 'P1', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '14호기', code: 'C1' }],
+    injection: {
+      '3층': [{ schedule: { 월: { day: { name: 'P1', id: 'p_00001' }, night: 'P1' } } }],
+    },
+  };
+  const { rows, unmappedProducts } = DataService.aggregateChemicalRequest(data, { days: ['월'] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].ink, 'INK1');
+  assert.equal(rows[0].total, 2);   // 객체 셀 1 + 레거시 문자열 셀 1
+  assert.equal(unmappedProducts.size, 0);
+});
+
+test('aggregateChemicalRequest: 동명 제품은 셀 id로 정확한 잉크 참조 (동명 구분)', () => {
+  const data = {
+    products: [
+      { id: 'p_00001', name: 'DUP', type: 'POWDER', inks: ['INK-P'] },
+      { id: 'p_00002', name: 'DUP', type: 'LIQUID', inks: ['INK-L'] },
+    ],
+    machineAssignments: [],
+    injection: {
+      '3층': [{ schedule: { 월: {
+        day: { name: 'DUP', id: 'p_00001' },
+        night: { name: 'DUP', id: 'p_00002' },
+      } } }],
+    },
+  };
+  const { rows } = DataService.aggregateChemicalRequest(data, { days: ['월'] });
+  const byInk = new Map(rows.map(r => [r.ink, r.total]));
+  assert.equal(byInk.get('INK-P'), 1);
+  assert.equal(byInk.get('INK-L'), 1);
+});
+
+test('aggregateChemicalRequest: 미해소 객체 셀은 unmappedProducts에 이름 문자열로 담김', () => {
+  const data = {
+    products: [],
+    machineAssignments: [],
+    injection: { '3층': [{ schedule: { 월: { day: { name: 'GHOST', id: 'p_09999' } } } }] },
+  };
+  const { rows, unmappedProducts } = DataService.aggregateChemicalRequest(data, { days: ['월'] });
+  assert.equal(rows.length, 0);
+  assert.deepEqual(Array.from(unmappedProducts), ['GHOST']);  // "[object Object]" 금지
+});
+
 // ── lintMasters ────────────────────────────────────────────────────────────
 
 test('lintMasters: 빈 데이터는 이슈 0건, 충돌 없이 통과', () => {
@@ -248,6 +296,41 @@ test('lintMasters: 사출계획에 있으나 제품 마스터에 없으면 produ
   assert.equal(missing[0].target, 'UNKNOWN');
   assert.equal(missing[0].severity, 'error');
   assert.match(missing[0].detail, /3층.*10호기.*월.*야/);
+});
+
+test('lintMasters: {name,id} 객체 셀 — 등록 제품은 이슈 0건, 크래시 없음 (id-셀 회귀)', () => {
+  // 수동 셀 편집·OCR 머지가 저장하는 {name,id} 객체 셀. 이전엔 객체가 그대로 비교돼
+  // 전부 product-not-in-master 오탐 + 정렬에서 target.localeCompare TypeError(앱 백지).
+  const data = {
+    products: [{ id: 'p_00001', name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: {
+        월: { day: { name: 'KNOWN', id: 'p_00001' }, night: { name: 'KNOWN', id: 'p_00001' } },
+        // id가 유효하면 표시 이름이 어긋나 있어도(개명 직후 등) 존재로 인정
+        화: { day: { name: 'KNOWN-구명', id: 'p_00001' } },
+      } }],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  assert.equal(r.issues.filter(i => i.category === 'product-not-in-master').length, 0);
+});
+
+test('lintMasters: 미등록 {name,id} 셀은 이름 문자열 target으로 dedup 보고', () => {
+  const data = {
+    products: [{ name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: {
+        월: { day: { name: 'GHOST', id: 'p_09999' }, night: { name: 'GHOST', id: 'p_09999' } },
+        화: { day: 'GHOST2', night: { name: 'GHOST2', id: 'p_09998' } },  // 문자열·객체 혼재
+      } }],
+    },
+  };
+  const r = DataService.lintMasters(data);   // 이슈 2건 이상이어도 정렬 크래시 없어야 함
+  const missing = r.issues.filter(i => i.category === 'product-not-in-master');
+  assert.deepEqual(missing.map(i => i.target).sort(), ['GHOST', 'GHOST2']);
+  for (const i of missing) assert.equal(typeof i.target, 'string');
 });
 
 test('lintMasters: 사출계획 TEST 런 셀은 정합성 점검 제외 (제품 아님)', () => {
@@ -497,6 +580,19 @@ test('buildDashboardSummary: shortage는 buildInkShortageBadge와 동일 값(단
   assert.ok(s.shortage.items.length <= 5);  // 상위 5 제한
 });
 
+test('buildDashboardSummary: depletion은 buildInkDepletionBadge와 동일 값(단일 출처 교차검증)', () => {
+  const data = {
+    products: [{ name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {}, inkPlan: [], testInks: [], inventory: [],
+  };
+  const s = DataService.buildDashboardSummary(data, [], { today: '월' });
+  const db = DataService.buildInkDepletionBadge(data, [], '월');
+  assert.equal(s.depletion.count, db.depletionCount);
+  assert.equal(s.depletion.show, db.show);
+  assert.ok(s.depletion.items.length <= 5);
+});
+
 test('buildDashboardSummary: masters 규모는 data 필드 length와 일치', () => {
   const data = {
     products: [{ name: 'A' }, { name: 'B' }],
@@ -714,6 +810,119 @@ test('collectInkShortage: 3건 초과 tooltip 상위 3개 + "외" 접미사', ()
   assert.equal(r.shortageCount, 4);
   assert.match(r.tooltip, /재고 부족 임박 4건/);
   assert.match(r.tooltip, /A · B · C 외$/);
+});
+
+// ── availableDays 기반 잉크 소진 임박 알림 ─────────────────────────────────
+const mkDepletionMetrics = (entries) => new Map(entries.map(([name, values]) => [
+  name,
+  new Map(Object.entries(values).map(([day, availableDays]) => [
+    day,
+    { availableDays, stock: availableDays == null ? null : availableDays * 2, required: 2 },
+  ])),
+]));
+
+test('collectInkDepletionRisks: 3일 경계 포함, 초과/null 제외', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }, { name: 'C' }];
+  const metrics = mkDepletionMetrics([
+    ['A', { 월: 3 }],
+    ['B', { 월: 3.1 }],
+    ['C', { 월: null }],
+  ]);
+  const result = DataService.collectInkDepletionRisks(merged, metrics, ['월', '화'], '월', 3);
+  assert.deepEqual(result.items.map(item => item.ink), ['A']);
+  assert.equal(result.items[0].availableDays, 3);
+});
+
+test('collectInkDepletionRisks: 오늘 이전 제외, 잉크별 첫 위험 요일만 수집', () => {
+  const merged = [{ name: 'A' }];
+  const metrics = mkDepletionMetrics([['A', { 월: 0.5, 화: 2, 수: 1 }]]);
+  const result = DataService.collectInkDepletionRisks(merged, metrics, ['월', '화', '수'], '화');
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].day, '화');
+  assert.equal(result.items[0].availableDays, 2);
+});
+
+test('collectInkDepletionRisks: 잔여일, 요일, 잉크명 순으로 안정 정렬', () => {
+  const merged = [{ name: 'C' }, { name: 'B' }, { name: 'A' }];
+  const metrics = mkDepletionMetrics([
+    ['A', { 월: 2 }],
+    ['B', { 화: 1 }],
+    ['C', { 월: 1 }],
+  ]);
+  const result = DataService.collectInkDepletionRisks(merged, metrics, ['월', '화'], '월');
+  assert.deepEqual(result.items.map(item => item.ink), ['C', 'B', 'A']);
+  assert.equal(result.urgentCount, 2);
+  assert.equal(result.show, true);
+});
+
+test('collectInkDepletionRisks: 위험 없음은 빈 정상 모델', () => {
+  const metrics = mkDepletionMetrics([['A', { 월: 4 }]]);
+  const result = DataService.collectInkDepletionRisks([{ name: 'A' }], metrics, ['월'], '월');
+  assert.equal(result.show, false);
+  assert.equal(result.depletionCount, 0);
+  assert.equal(result.tooltip, '소진 임박 없음');
+});
+
+test('collectInkDepletionRisks: threshold null/빈문자열은 기본 3일 (0으로 오인 금지)', () => {
+  // Number(null)===0 이라 finite 검사만으로는 null이 임계 0으로 강등돼 warn 경고가 전멸.
+  const merged = [{ name: 'A' }];
+  const metrics = mkDepletionMetrics([['A', { 월: 2 }]]);
+  assert.equal(DataService.collectInkDepletionRisks(merged, metrics, ['월'], '월', null).depletionCount, 1);
+  assert.equal(DataService.collectInkDepletionRisks(merged, metrics, ['월'], '월', '').depletionCount, 1);
+  // 명시적 0은 존중 (가용 2 > 0 → 제외)
+  assert.equal(DataService.collectInkDepletionRisks(merged, metrics, ['월'], '월', 0).depletionCount, 0);
+});
+
+// ── buildInkPlanningAlerts (파이프라인 합성 — 실데이터) ─────────────────────
+
+test('buildInkPlanningAlerts: 실데이터 합성 — 사출 수요+수동 재고로 부족·소진 동시 산출', () => {
+  const data = {
+    products: [{ id: 'p_00001', name: 'PROD', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: {
+        월: { day: { name: 'PROD', id: 'p_00001' }, night: 'PROD' },  // 수요 2 (id 셀·레거시 혼재)
+        화: { day: 'PROD' },
+        수: { day: 'PROD' },
+        목: { day: 'PROD' },
+      } }],
+    },
+    inkPlan: [{ name: 'INK1', days: { 월: { 현재고: 4 } } }],
+    testInks: [],
+    inventory: null,
+  };
+  const alerts = DataService.buildInkPlanningAlerts(data, {}, '월');
+  // 주간 부족: 월 현재고 4 − 총소요 5(월2+화1+수1+목1) = −1
+  assert.equal(alerts.shortage.shortageCount, 1);
+  assert.equal(alerts.shortage.items[0].ink, 'INK1');
+  assert.equal(alerts.shortage.items[0].weeklyNeed, -1);
+  // 소진 임박: 월 가용일 = 4/2 = 2.0 ≤ 3 → warn
+  assert.equal(alerts.depletion.depletionCount, 1);
+  assert.deepEqual(alerts.depletion.items[0], {
+    ink: 'INK1', day: '월', availableDays: 2, stock: 4, required: 2, tone: 'warn',
+  });
+});
+
+test('buildInkPlanningAlerts: 제조 후 회복 — 오늘 이후 잔여일이 회복되면 소진 경고 없음', () => {
+  const mkData = (manufacture) => ({
+    products: [{ id: 'p_00001', name: 'PROD', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '10호기', schedule: {
+        월: { day: 'PROD' }, 화: { day: 'PROD' }, 수: { day: 'PROD' },
+      } }],
+    },
+    inkPlan: [{ name: 'INK1', days: { 월: { 현재고: 1, 제조량: manufacture } } }],
+    testInks: [],
+  });
+  // 월 제조 5 → 화 carry 5·수 carry 4 — 오늘(화) 이후 가용일 회복, 경고 없음
+  const recovered = DataService.buildInkPlanningAlerts(mkData(5), {}, '화');
+  assert.equal(recovered.depletion.depletionCount, 0);
+  // 제조 없으면 화 carry 0 → 가용 0일 — bad 경고
+  const depleted = DataService.buildInkPlanningAlerts(mkData(null), {}, '화');
+  assert.equal(depleted.depletion.depletionCount, 1);
+  assert.equal(depleted.depletion.items[0].day, '화');
+  assert.equal(depleted.depletion.items[0].tone, 'bad');
 });
 
 // ── buildChemicalRequestMeta (약품요청서 인쇄 메타) ───────────────────────────

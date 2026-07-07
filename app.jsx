@@ -210,6 +210,10 @@ function App() {
           };
 
           try {
+            // base rev 미보유(localStorage 폴백 로드 등) 상태로 If-Match 없이 POST 하면
+            // 서버 최신본을 무조건 덮어쓴다(OCC 우회) — 충돌 경로로 보내 최신본과
+            // 3-way 병합/사용자 선택을 거치게 한다. 서버도 If-Match 부재를 428 거부.
+            if (!dbRevRef.current) { const e = new Error('no base rev'); e.conflict = true; throw e; }
             const rev = await postDb(snapshot, dbRevRef.current);
             dbRevRef.current = rev;
             lastSyncedRef.current = snapshot;
@@ -218,6 +222,7 @@ function App() {
 
             // 충돌: 최신본을 받아 base(마지막 동기화본) 대비 3-way 병합 판정.
             const fresh = await fetch('/api/db', { cache: 'no-store' });
+            if (!fresh.ok) throw new Error(`file DB ${fresh.status}`);
             const serverRev = (fresh.headers.get('ETag') || '').replace(/"/g, '') || null;
             let server;
             try { server = migrateData(await fresh.json()); } catch (e) { server = {}; }
@@ -298,16 +303,27 @@ function App() {
 
   // 마스터 정합성 전역 경고 배지 — data-quality 페이지와 동일한 lintMasters 단일 출처에서 파생.
   // data===null이어도 lintMasters는 null-safe → show=false.
+  // lint 예외는 배지만 강등(경고 없음) — 헤더 파생값이 throw하면 앱 전체가 백지가 된다.
   const masterHealth = useMemo(() => {
-    const lint = DataService.lintMasters(data, { normalize: normalizeProductName });
-    return DataService.buildMasterHealthBadge(lint.summary);
+    try {
+      const lint = DataService.lintMasters(data, { normalize: normalizeProductName });
+      return DataService.buildMasterHealthBadge(lint.summary);
+    } catch (e) {
+      console.warn('lintMasters 실패 — 정합성 배지 생략:', e);
+      return DataService.buildMasterHealthBadge(null);
+    }
   }, [data]);
 
-  // 재고 부족 예상 전역 알림 — ink-plan 페이지와 동일한 computeInkMetrics().weeklyNeed 단일 출처에서 파생.
-  const inkShortage = useMemo(() => {
-    if (!data) return { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' };
-    return DataService.buildInkShortageBadge(data, weekInfo.dates);
-  }, [data, weekInfo.dates]);
+  // 재고 위험 전역 알림 — 부족량과 소진 잔여일을 동일 계획 계산에서 함께 파생.
+  const inkAlerts = useMemo(() => {
+    if (!data) return {
+      shortage: { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' },
+      depletion: { depletionCount: 0, urgentCount: 0, items: [], show: false, tooltip: '소진 임박 없음' },
+    };
+    return DataService.buildInkPlanningAlerts(data, weekInfo.dates, weekInfo.today);
+  }, [data, weekInfo]);
+  const inkShortage = inkAlerts.shortage;
+  const inkDepletion = inkAlerts.depletion;
 
   if (!data) {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100vh', color: 'var(--ink-600)' }}>로딩 중…</div>;
@@ -370,11 +386,20 @@ function App() {
     }
   };
 
-  // 헤더 bell = 통합 알림 센터(마스터 결함 + 재고 부족). 심각도 우선: 마스터 error는 빨강·data-quality.
-  const bellShow = masterHealth.show || inkShortage.show;
-  const bellCount = (masterHealth.show ? masterHealth.errorCount : 0) + inkShortage.shortageCount;
-  const bellTip = [masterHealth.show ? masterHealth.tooltip : null, inkShortage.show ? inkShortage.tooltip : null].filter(Boolean).join(' / ') || '처리 필요 알림 없음';
-  const bellBad = masterHealth.show; // 마스터 error 있으면 빨강, 아니면 주황
+  // 헤더 bell = 통합 알림 센터(마스터 결함 + 주간 부족 + 3일 이내 소진).
+  // 같은 잉크가 부족·소진 양쪽에 잡히면 1건으로(union) — 알람 피로 방지.
+  const riskInkCount = new Set([
+    ...inkShortage.items.map(i => i.ink),
+    ...inkDepletion.items.map(i => i.ink),
+  ]).size;
+  const bellShow = masterHealth.show || inkShortage.show || inkDepletion.show;
+  const bellCount = (masterHealth.show ? masterHealth.errorCount : 0) + riskInkCount;
+  const bellTip = [
+    masterHealth.show ? masterHealth.tooltip : null,
+    inkShortage.show ? inkShortage.tooltip : null,
+    inkDepletion.show ? inkDepletion.tooltip : null,
+  ].filter(Boolean).join(' / ') || '처리 필요 알림 없음';
+  const bellBad = masterHealth.show || inkDepletion.urgentCount > 0;
   const bellTo = masterHealth.show ? 'data-quality' : 'ink-plan';
   const bellStyle = bellBad
     ? { background: 'var(--bad-100, oklch(0.95 0.05 25))', borderColor: 'var(--bad-600, oklch(0.55 0.18 25))', color: 'var(--bad-600, oklch(0.55 0.18 25))' }
@@ -440,8 +465,13 @@ function App() {
                 {item.id === 'data-quality' && masterHealth.show && (
                   <span className="sb-item__badge sb-item__badge--alert" title={masterHealth.tooltip}>{masterHealth.errorCount}</span>
                 )}
-                {item.id === 'ink-plan' && inkShortage.show && (
-                  <span className="sb-item__badge sb-item__badge--warn" title={inkShortage.tooltip}>{inkShortage.shortageCount}</span>
+                {item.id === 'ink-plan' && (inkShortage.show || inkDepletion.show) && (
+                  <span
+                    className="sb-item__badge sb-item__badge--warn"
+                    title={[inkShortage.show ? inkShortage.tooltip : null, inkDepletion.show ? inkDepletion.tooltip : null].filter(Boolean).join(' / ')}
+                  >
+                    {riskInkCount}
+                  </span>
                 )}
               </div>
             ))}

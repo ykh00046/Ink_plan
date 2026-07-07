@@ -5,7 +5,7 @@ import socket
 import threading
 import traceback
 import webbrowser
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from storage import (
     ASSET_ROOT,
@@ -30,8 +30,9 @@ PORT = 8766
 URL = f"http://127.0.0.1:{PORT}/"
 
 # 런타임 데이터(API 키/DB/백업/시드)는 정적 파일로 노출 금지 — /api/* 로만 접근.
-# deny-by-default: /data/ 전체 차단. 시드(clean.json)도 /api/seed 로만 제공.
-BLOCKED_STATIC_PREFIX = "/data/"
+# deny-by-default: data/ 트리 전체 차단. 시드(clean.json)도 /api/seed 로만 제공.
+# 차단 판정은 translate_path() 결과(실제 열리는 파일 경로) 기준 — is_blocked_static 참고.
+BLOCKED_DATA_DIRNAME = "data"
 # 요청 본문 상한 (DB 저장용) — 메모리 보호
 MAX_BODY_BYTES = 64 * 1024 * 1024
 # /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
@@ -71,7 +72,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _if_match_rev(self):
-        # If-Match 헤더(따옴표 포함 ETag)에서 base 리비전 추출. 없으면 None → 무조건 기록.
+        # If-Match 헤더(따옴표 포함 ETag)에서 base 리비전 추출. 없으면 None.
+        # /api/db 쓰기는 If-Match 필수(428) — 없으면 OCC(lost-update 가드)가 통째로 우회된다.
         raw = self.headers.get("If-Match")
         return raw.strip().strip('"') if raw else None
 
@@ -91,10 +93,21 @@ class Handler(SimpleHTTPRequestHandler):
         return True
 
     def is_blocked_static(self):
-        # /data/ 트리는 전면 차단(deny-by-default) — 시드 포함 전부 /api/* 로만.
-        # 퍼센트 인코딩 해제 + 소문자화로 인코딩·대소문자 우회 차단.
-        decoded = unquote(urlparse(self.path).path).lower()
-        return decoded.startswith(BLOCKED_STATIC_PREFIX)
+        # data/ 트리는 전면 차단(deny-by-default) — 시드 포함 전부 /api/* 로만.
+        # 차단 판정은 실제 파일을 여는 translate_path() 결과(해석된 절대 경로)로 수행.
+        # URL 문자열 프리픽스 검사만으로는 //data/...(urlparse가 data를 netloc으로 흡수),
+        # /data./...(Windows가 후행 점을 제거하고 열어줌) 같은 파싱 불일치 우회가 가능했다.
+        try:
+            target = Path(self.translate_path(self.path)).resolve()
+            root = Path(ASSET_ROOT).resolve()
+            rel = target.relative_to(root)
+        except ValueError:
+            return True   # 프로젝트 루트 밖으로 해석되는 경로 → 차단
+        except Exception:
+            return True   # 해석 불가/비정상 경로 → 차단 (deny-by-default)
+        # Windows 후행 점·공백 제거 의미론 반영: 구성요소 정규화 후 data 트리 판정
+        parts = [p.rstrip(". ").lower() for p in rel.parts]
+        return bool(parts) and parts[0] == BLOCKED_DATA_DIRNAME
 
     def read_body_json(self):
         # chunked 본문은 stdlib 핸들러가 디코드하지 않아 0바이트로 오인됨 → 명시 거부.
@@ -187,10 +200,16 @@ class Handler(SimpleHTTPRequestHandler):
                 if not isinstance(data, dict):
                     self.send_json({"error": "invalid json"}, 400)
                     return
-                # If-Match 기준 리비전과 현재 rev 가 일치할 때만 기록(OCC). 없으면 무조건 기록.
+                # If-Match 기준 리비전과 현재 rev 가 일치할 때만 기록(OCC).
+                # If-Match 부재는 428 거부 — 무조건 기록을 허용하면 stale 탭이 다른
+                # 사용자의 최신 편집을 409 없이 통째로 덮어쓴다(lost-update).
+                base_rev = self._if_match_rev()
+                if base_rev is None:
+                    self.send_json({"error": "precondition required"}, 428)
+                    return
                 # X-Edit-Source: 편집 화면 식별자 — 감사 로그 source. 누락 시 'web'.
                 source = self.headers.get("X-Edit-Source") or "web"
-                new_rev = write_current_checked(data, self._if_match_rev(), source=source)
+                new_rev = write_current_checked(data, base_rev, source=source)
                 self.send_json({"ok": True, "rev": new_rev},
                                headers={"ETag": f'"{new_rev}"'})
                 return

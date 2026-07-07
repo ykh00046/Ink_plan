@@ -123,10 +123,9 @@
     const shiftFilter = new Set(shifts);
     const floorFilter = new Set(floors);
 
-    const productInks = new Map();
-    for (const p of (data?.products || [])) {
-      productInks.set(p.name, (p.inks || []).filter(Boolean));
-    }
+    // 셀은 레거시 문자열 또는 {name,id} 객체 — id-정밀 해소(동명 구분) 후 잉크 참조.
+    // buildDemandByInkDay·ink-add 와 동일한 resolveProductCell 경로로 집계 일치 보장.
+    const productLookup = buildProductLookup(data?.products);
     const inkMeta = new Map();
     for (const a of (data?.machineAssignments || [])) {
       const ink = a.ink || a.product || a.name || '';
@@ -147,11 +146,13 @@
           const cell = schedule[day] || {};
           for (const shift of Object.keys(cell)) {
             if (!shiftFilter.has(shift)) continue;
-            const product = cell[shift];
-            if (!product) continue;
-            const inks = productInks.get(product);
-            if (!inks || inks.length === 0) {
-              unmappedProducts.add(product);
+            const cellValue = cell[shift];
+            const productName = productCellName(cellValue);
+            if (!productName) continue;
+            const product = resolveProductCell(productLookup, cellValue);
+            const inks = product ? (product.inks || []).filter(Boolean) : [];
+            if (inks.length === 0) {
+              unmappedProducts.add(productName);
               continue;
             }
             for (const ink of inks) {
@@ -199,12 +200,14 @@
     const assignments = (data && data.machineAssignments) || [];
     const injection = (data && data.injection) || {};
 
-    // 1) 제품 마스터 인덱스: 원본 이름 → inks, 정규화 → 원본 이름
+    // 1) 제품 마스터 인덱스: 원본 이름 → inks, 정규화 → 원본 이름, id 집합
     const productInks = new Map();          // name → inks[] (Boolean true 인 것만)
     const normProductName = new Map();      // normalized → original name
+    const productIds = new Set();           // id — {name,id} 셀의 id-정밀 존재 판정용
     for (const p of products) {
       const name = String(p.name || '');
       if (!name) continue;
+      if (p.id) productIds.add(p.id);
       const inks = (p.inks || []).filter(Boolean);
       productInks.set(name, inks);
       const n = norm(name);
@@ -279,11 +282,16 @@
         for (const day of Object.keys(schedule)) {
           const cell = schedule[day] || {};
           for (const shift of Object.keys(cell)) {
-            const value = cell[shift];
+            // 셀은 레거시 문자열 또는 {name,id} 객체 — 이름으로 정규화 후 비교(객체 그대로
+            // 비교하면 전부 오탐 + target 정렬에서 localeCompare 크래시).
+            const raw = cell[shift];
+            const value = productCellName(raw);
             if (!value) continue;
             // TEST 런 셀은 제품이 아님 — 정합성 점검 제외 (검수 isTest 판정과 동일 기준)
             const normTest = normalizeProductName(value);
             if (normTest === 'TEST' || normTest === '테스트') continue;
+            const cellId = productCellId(raw);
+            if (cellId && productIds.has(cellId)) continue;
             if (productInks.has(value)) continue;
             const n = norm(value);
             if (n && normProductName.has(n)) continue;
@@ -403,15 +411,78 @@
     };
   }
 
+  // Design Ref: ink-depletion-alert §3 — availableDays 기반 소진 위험 모델.
+  // 오늘 이후 첫 유효 소요일만 잉크별 1건 수집해 중복 경고와 과거 요일 오탐을 막는다.
+  function collectInkDepletionRisks(merged, computedByInk, days, today, threshold) {
+    const orderedDays = Array.isArray(days) && days.length ? days : WEEKDAYS;
+    const todayIdx = orderedDays.indexOf(today);
+    const startIdx = todayIdx >= 0 ? todayIdx : 0;
+    // 임계값 비정상(null/''/NaN/음수) → 기본 3일 (design §6).
+    // Number(null)===0 이라 finite 검사만으로는 null이 임계 0으로 오인된다.
+    const limit = (threshold != null && threshold !== ''
+      && Number.isFinite(Number(threshold)) && Number(threshold) >= 0)
+      ? Number(threshold)
+      : 3;
+    const items = [];
+
+    for (const ink of (merged || [])) {
+      for (let i = startIdx; i < orderedDays.length; i++) {
+        const day = orderedDays[i];
+        const metrics = computedByInk.get(ink.name)?.get(day);
+        const availableDays = Number(metrics?.availableDays);
+        if (metrics?.availableDays == null || !Number.isFinite(availableDays) || availableDays > limit) continue;
+        items.push({
+          ink: ink.name,
+          day,
+          availableDays,
+          stock: metrics.stock,
+          required: metrics.required,
+          tone: availableDays <= 1 ? 'bad' : 'warn',
+        });
+        break;
+      }
+    }
+
+    items.sort((a, b) => (
+      a.availableDays - b.availableDays
+      || orderedDays.indexOf(a.day) - orderedDays.indexOf(b.day)
+      || a.ink.localeCompare(b.ink)
+    ));
+    const n = items.length;
+    const urgentCount = items.filter(item => item.tone === 'bad').length;
+    const names = items.slice(0, 3).map(item => item.ink).join(' · ');
+    return {
+      depletionCount: n,
+      urgentCount,
+      items,
+      show: n > 0,
+      tooltip: n > 0 ? `잉크 소진 임박 ${n}건 — ${names}${n > 3 ? ' 외' : ''}` : '소진 임박 없음',
+    };
+  }
+
+  // Plan SC-3: 부족량과 소진 잔여일은 동일 computeInkMetrics 결과에서 함께 파생한다.
+  function buildInkPlanningAlerts(data, dates, today, threshold) {
+    const source = data || {};
+    const days = WEEKDAYS;
+    const productLookup     = buildProductLookup(source.products);
+    const demandByInkDay    = buildDemandByInkDay(source.injection, productLookup);
+    const inventoryByInkDay = buildInventoryByInkDay(source.inventory, dates);
+    const merged            = mergeInkPlanAndTestInks(source.inkPlan, source.testInks, days);
+    const computedByInk     = computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days);
+    return {
+      shortage: collectInkShortage(merged, computedByInk),
+      depletion: collectInkDepletionRisks(merged, computedByInk, days, today, threshold),
+    };
+  }
+
   // 전역 알림용 어댑터: data → 부족 배지 모델. ink-plan 페이지와 동일 함수 합성.
   function buildInkShortageBadge(data, dates) {
-    const days = WEEKDAYS;
-    const productLookup     = buildProductLookup(data.products);
-    const demandByInkDay    = buildDemandByInkDay(data.injection, productLookup);
-    const inventoryByInkDay = buildInventoryByInkDay(data.inventory, dates);
-    const merged            = mergeInkPlanAndTestInks(data.inkPlan, data.testInks, days);
-    const computedByInk     = computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days);
-    return collectInkShortage(merged, computedByInk);
+    return buildInkPlanningAlerts(data, dates).shortage;
+  }
+
+  // 전역 알림용 어댑터: data → 3일 이내 소진 임박 배지 모델.
+  function buildInkDepletionBadge(data, dates, today, threshold) {
+    return buildInkPlanningAlerts(data, dates, today, threshold).depletion;
   }
 
   // 전역 통합 대시보드 요약 모델(순수 합성). 기존 어댑터(lintMasters→buildMasterHealthBadge,
@@ -423,7 +494,11 @@
       : (v && typeof v === 'object' ? Object.keys(v).length : 0);
 
     // 1) 마스터 정합성 — lintMasters → buildMasterHealthBadge (전역 배지와 동일 경로)
-    const lint = lintMasters(data, opts.normalize ? { normalize: opts.normalize } : undefined);
+    // 진입 화면 절대 throw 금지 — lint 실패 시 정합성 카드만 '정상'으로 강등.
+    let lint = { summary: { total: 0, byCategory: {}, bySeverity: { error: 0, warn: 0, info: 0 } }, issues: [] };
+    try {
+      lint = lintMasters(data, opts.normalize ? { normalize: opts.normalize } : undefined);
+    } catch (e) { /* keep default */ }
     const mh = buildMasterHealthBadge(lint.summary);
     const master = {
       errorCount:  mh.errorCount || 0,
@@ -436,16 +511,29 @@
 
     // 2) 재고 부족 임박 — buildInkShortageBadge (ink-plan 빨강 셀·bell과 동일 출처)
     // 진입 화면이라 부분/이상 데이터에도 절대 throw 금지 → 실패 시 '정상'으로 graceful.
-    let sb = { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' };
+    let alerts = {
+      shortage: { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' },
+      depletion: { depletionCount: 0, urgentCount: 0, items: [], show: false, tooltip: '소진 임박 없음' },
+    };
     if (data) {
-      try { sb = buildInkShortageBadge(data, dates); } catch (e) { /* keep default */ }
+      try { alerts = buildInkPlanningAlerts(data, dates, opts.today, opts.depletionThreshold); } catch (e) { /* keep default */ }
     }
+    const sb = alerts.shortage;
     const shortage = {
       count:   sb.shortageCount || 0,
       items:   (sb.items || []).slice(0, 5), // 가장 부족한 상위 5
       show:    !!sb.show,
       tooltip: sb.tooltip,
       tone:    (sb.shortageCount || 0) > 0 ? 'warn' : 'ok',
+    };
+    const db = alerts.depletion;
+    const depletion = {
+      count:       db.depletionCount || 0,
+      urgentCount: db.urgentCount || 0,
+      items:       (db.items || []).slice(0, 5),
+      show:        !!db.show,
+      tooltip:     db.tooltip,
+      tone:        (db.urgentCount || 0) > 0 ? 'bad' : ((db.depletionCount || 0) > 0 ? 'warn' : 'ok'),
     };
 
     // 3) 마스터 규모(참고용, 비경보) — 배열/객체 모두 안전 카운트
@@ -467,7 +555,7 @@
       ? (dates[opts.today] || null) : null;
     const week = { today: opts.today || null, todayDate, dates: weekDates, dayCount: weekDates.length };
 
-    return { master, shortage, masters, week };
+    return { master, shortage, depletion, masters, week };
   }
 
   // 약품요청서 인쇄 메타 — 작성자 fallback·문서번호·요약·결재 roster를 한 곳에서 산출.
@@ -1531,7 +1619,9 @@
         for (const day of Object.keys(m.schedule || {})) {
           const cell = m.schedule[day] || {};
           for (const k of ['day', 'night']) {
-            const v = String(cell[k] || '').trim();
+            // {name,id} 객체 셀은 이름만 — String() 강제 변환하면 "[object Object]"가
+            // OCR grounding 어휘를 오염시킨다.
+            const v = productCellName(cell[k]).trim();
             if (v) products.add(v);
           }
         }
@@ -1756,7 +1846,10 @@
     lintMasters,
     buildMasterHealthBadge,
     collectInkShortage,
+    collectInkDepletionRisks,
+    buildInkPlanningAlerts,
     buildInkShortageBadge,
+    buildInkDepletionBadge,
     buildDashboardSummary,
     lotSequenceForDate,
     nextInventoryLotNo,

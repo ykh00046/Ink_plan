@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const DataService = require('../data-service.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 test('builds a three-day window from today forward', () => {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -137,6 +139,17 @@ test('keeps separate production lots for the same ink as separate initial rows',
     'SOUL051701',
   ]);
   assert.deepEqual(DataService.relabelLotsForInitial(lots, lots[0]), []);
+});
+
+test('depletion alert is wired to global navigation and dashboard', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
+  assert.match(app, /buildInkPlanningAlerts/);
+  // bell/사이드바는 부족+소진 union 카운트(같은 잉크 이중 카운트 방지)로 배선됨
+  assert.match(app, /riskInkCount/);
+  assert.match(app, /inkDepletion\.items/);
+  assert.match(dashboard, /title="잉크 소진 임박"/);
+  assert.match(dashboard, /availableDays/);
 });
 
 test('relabel belongs only to its original lot row', () => {

@@ -98,11 +98,11 @@ def main():
             st, payload, rev3 = req(base, "POST", {"v": 3}, if_match=rev2)
             check("최신 rev 로 재시도 → 200", st == 200)
 
-            # 6) POST If-Match 없음 → 200(폴백 호환)
+            # 6) POST If-Match 없음 → 428 거부(OCC 우회 차단) + 파일 보존
             st, payload, _ = req(base, "POST", {"v": 4})
-            check("If-Match 없음 → 200(폴백)", st == 200)
+            check("If-Match 없음 → 428 거부", st == 428)
             st, payload, _ = req(base, "GET")
-            check("무조건 기록 반영 v=4", payload.get("v") == 4)
+            check("거부 후 파일 보존 v=3", payload.get("v") == 3)
         finally:
             httpd.shutdown()
 

@@ -21,6 +21,8 @@ def make_handler(headers=None, path="/"):
     h = server.Handler.__new__(server.Handler)
     h.headers = headers or {}
     h.path = path
+    # is_blocked_static 이 translate_path()(→ self.directory) 기준으로 판정하므로 주입.
+    h.directory = str(server.ASSET_ROOT)
     return h
 
 
@@ -144,6 +146,21 @@ class BlockedStaticTest(unittest.TestCase):
 
     def test_encoded_sheets_bypass_blocked(self):
         self.assertTrue(make_handler(path="/data%2Fsheets.json").is_blocked_static())
+
+    def test_double_slash_bypass_blocked(self):
+        # //data/... — urlparse 는 data 를 netloc 으로 흡수해 프리픽스 검사를 통과했지만
+        # translate_path 는 실제 data/ 파일을 연다. 판정 기준을 translate_path 로 통일해 차단.
+        self.assertTrue(make_handler(path="//data/settings.json").is_blocked_static())
+        self.assertTrue(make_handler(path="//data/db/current.json").is_blocked_static())
+
+    def test_windows_trailing_dot_bypass_blocked(self):
+        # /data./... — Windows 는 후행 점을 제거하고 실제 data/ 를 연다.
+        self.assertTrue(make_handler(path="/data./db/current.json").is_blocked_static())
+        self.assertTrue(make_handler(path="/data%2E/settings.json").is_blocked_static())
+
+    def test_dotdot_traversal_blocked(self):
+        # 루트 밖 해석(상위 탈출)은 translate_path 가 무시하지만, 판정은 deny-by-default.
+        self.assertTrue(make_handler(path="/vendor/../data/settings.json").is_blocked_static())
 
 
 class ReadBodyJsonTest(unittest.TestCase):
@@ -271,8 +288,9 @@ class DbRevisionTest(unittest.TestCase):
                 for p in patches:
                     p.stop()
 
-    def test_post_without_if_match_writes_200(self):
-        # If-Match 부재 → 무조건 기록(폴백/레거시 호환)
+    def test_post_without_if_match_rejected_428(self):
+        # If-Match 부재 → 428 거부. 무조건 기록을 허용하면 stale 탭(폴백 로드 등)이
+        # 다른 사용자의 최신 편집을 409 없이 통째로 덮어쓴다(OCC 우회).
         with tempfile.TemporaryDirectory() as td:
             patches, current = _patch_storage(td, {"v": 1})
             for p in patches:
@@ -281,8 +299,9 @@ class DbRevisionTest(unittest.TestCase):
                 body = json.dumps({"v": 7}).encode("utf-8")
                 h, cap = make_post_handler(body, path="/api/db")
                 h.do_POST()
-                self.assertEqual(cap["status"], 200)
-                self.assertEqual(storage.read_json(current)["v"], 7)
+                self.assertEqual(cap["status"], 428)
+                # 거부 시 파일 보존
+                self.assertEqual(storage.read_json(current)["v"], 1)
             finally:
                 for p in patches:
                     p.stop()
@@ -386,8 +405,12 @@ class AuditApiTest(unittest.TestCase):
             for p in patches:
                 p.start()
             try:
+                rev = storage.compute_rev(storage.read_json(current))
                 body = json.dumps(after).encode("utf-8")
-                h, cap = make_post_handler(body, headers={"X-Edit-Source": "injection"}, path="/api/db")
+                h, cap = make_post_handler(
+                    body,
+                    headers={"X-Edit-Source": "injection", "If-Match": f'"{rev}"'},
+                    path="/api/db")
                 h.do_POST()
                 self.assertEqual(cap["status"], 200)
                 log = storage.read_audit()
@@ -407,8 +430,10 @@ class AuditApiTest(unittest.TestCase):
             for p in patches:
                 p.start()
             try:
+                rev = storage.compute_rev(storage.read_json(current))
                 body = json.dumps(after).encode("utf-8")
-                h, cap = make_post_handler(body, path="/api/db")  # 헤더 없음
+                # X-Edit-Source 없음 (If-Match 는 필수라 포함)
+                h, cap = make_post_handler(body, headers={"If-Match": f'"{rev}"'}, path="/api/db")
                 h.do_POST()
                 log = storage.read_audit()
                 self.assertEqual(len(log), 1)

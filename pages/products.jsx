@@ -95,9 +95,11 @@ function ProductsPage({ ctx }) {
       return;
     }
     const newData = { ...data };
-    const normalized = { ...product, customer: product.brand || product.customer || '', inks: padInks3(product.inks) };
+    // 편집 폼에는 id 등 비표시 필드가 없다 — patch로 만들고, 수정 시 기존 행과 merge해
+    // 정체성 id를 보존한다(id 소실 시 동명 구분·id-셀 해소가 전부 깨짐).
+    const patch = { ...product, customer: product.brand || product.customer || '', inks: padInks3(product.inks) };
     if (editing.mode === 'add') {
-      normalized.id = normalized.id || DataService.allocateProductId(newData.products);
+      const normalized = { ...patch, id: patch.id || DataService.allocateProductId(newData.products) };
       newData.products = [normalized, ...newData.products];
       notify('제품이 추가되었습니다');
     } else {
@@ -110,8 +112,8 @@ function ProductsPage({ ctx }) {
         return;
       }
       newData.products = [...newData.products];
-      newData.products[idx] = normalized;
-      newData.injection = DataService.renameInjectionRefs(data.injection, oldName, normalized.name, editing.product.id);
+      newData.products[idx] = { ...newData.products[idx], ...patch };
+      newData.injection = DataService.renameInjectionRefs(data.injection, oldName, patch.name, editing.product.id);
       notify('제품이 수정되었습니다');
     }
     setData(newData);
@@ -218,7 +220,7 @@ function ProductsPage({ ctx }) {
                   </td>
                 </tr>
                 {filtered.map((p) => (
-                  <tr key={p.name}>
+                  <tr key={p.id || p.name}>
                     <td>{p.factory ? <span className="tag">{p.factory}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
                     <td className="sticky-col" style={{ fontWeight: 500 }}>{p.name}</td>
                     <td>{p.type ? <span className="tag">{p.type}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>

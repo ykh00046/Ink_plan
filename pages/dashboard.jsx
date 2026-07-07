@@ -1,6 +1,6 @@
 // 통합 대시보드 — 흩어진 핵심 지표(마스터 정합성·재고 부족·이번 주 일정·마스터 규모)를
-// 진입 화면 한 곳에 요약한다. 모든 수치는 data-service.buildDashboardSummary(기존 어댑터
-// lintMasters·buildInkShortageBadge 합성)에서 파생되어 각 페이지·사이드바 배지·bell과 항상 일치.
+// 진입 화면 한 곳에 요약한다. 모든 수치는 data-service.buildDashboardSummary에서 파생되어
+// 각 페이지·사이드바 배지·bell과 항상 일치한다.
 // read-only(데이터 변경 없음). 카드 클릭 → ctx.setView로 해당 작업 화면 이동.
 
 function DashboardPage({ ctx }) {
@@ -14,7 +14,7 @@ function DashboardPage({ ctx }) {
     [data, dates, today]
   );
 
-  const { master, shortage, masters, week } = sum;
+  const { master, shortage, depletion, week } = sum;
 
   const Card = ({ tone, title, value, sub, go }) => (
     <button
@@ -29,6 +29,7 @@ function DashboardPage({ ctx }) {
   );
 
   const shortNames = shortage.items.map(i => i.ink).join(' · ');
+  const depletionNames = depletion.items.map(i => i.ink).join(' · ');
   const weekValue = week.today
     ? `오늘 ${week.today}요일${week.todayDate ? ` (${week.todayDate})` : ''}`
     : '이번 주';
@@ -67,11 +68,11 @@ function DashboardPage({ ctx }) {
           go="injection"
         />
         <Card
-          tone="ok"
-          title="마스터 규모"
-          value={`제품 ${masters.products} · 잉크 ${masters.inks} · 약품 ${masters.chemicals}`}
-          sub="제품·잉크·약품 마스터 관리"
-          go="products"
+          tone={depletion.tone}
+          title="잉크 소진 임박"
+          value={depletion.count > 0 ? `${depletion.count}건` : '정상'}
+          sub={depletion.count > 0 ? depletionNames : '3일 이내 소진 예상 없음'}
+          go="ink-plan"
         />
       </div>
 
@@ -115,19 +116,30 @@ function DashboardPage({ ctx }) {
 
         <div className="card">
           <div className="card__head">
-            <span className="title">{shortage.count > 0 ? '재고 부족 상세' : '빠른 작업'}</span>
+            <span className="title">{shortage.count > 0 || depletion.count > 0 ? '재고 위험 상세' : '빠른 작업'}</span>
           </div>
           <div className="card__body">
-            {shortage.count > 0 ? (
+            {shortage.count > 0 || depletion.count > 0 ? (
               <div style={{ display: 'grid', gap: 8 }}>
-                {shortage.items.slice(0, 8).map(it => (
-                  <button key={it.ink} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
+                {shortage.items.map(it => (
+                  <button key={`shortage-${it.ink}`} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
                     <span style={{ fontWeight: 600 }}>{it.ink}</span>
                     <span style={{ color: 'var(--bad-600)', fontWeight: 600 }}>부족 {Math.abs(it.weeklyNeed).toLocaleString()}</span>
                   </button>
                 ))}
-                {shortage.items.length > 8 && (
-                  <div style={{ fontSize: 11, color: 'var(--ink-500)', textAlign: 'center' }}>외 {shortage.items.length - 8}건 — 잉크 생산계획에서 확인</div>
+                {depletion.items.map(it => (
+                  <button key={`depletion-${it.ink}`} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
+                    <span style={{ fontWeight: 600 }}>{it.ink} · {it.day}요일</span>
+                    <span style={{ color: it.tone === 'bad' ? 'var(--bad-600)' : 'var(--warn-700)', fontWeight: 600 }}>
+                      잔여 {it.availableDays.toLocaleString()}일
+                    </span>
+                  </button>
+                ))}
+                {/* items는 buildDashboardSummary에서 카테고리별 상위 5로 캡 — 넘친 건수는 count로 산출 */}
+                {(shortage.count + depletion.count) > (shortage.items.length + depletion.items.length) && (
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)', textAlign: 'center' }}>
+                    외 {(shortage.count + depletion.count) - (shortage.items.length + depletion.items.length)}건 — 잉크 생산계획에서 확인
+                  </div>
                 )}
               </div>
             ) : (
