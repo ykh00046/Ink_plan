@@ -141,6 +141,17 @@ test('keeps separate production lots for the same ink as separate initial rows',
   assert.deepEqual(DataService.relabelLotsForInitial(lots, lots[0]), []);
 });
 
+test('weekly snapshot: history page is wired to close + list + read APIs', () => {
+  const history = fs.readFileSync(path.join(__dirname, '..', 'pages', 'history.jsx'), 'utf8');
+  // 생산(마감) + 소비(목록·읽기) 경로가 모두 배선됐는지
+  assert.match(history, /closeWeek/);
+  assert.match(history, /'\/api\/snapshot'|"\/api\/snapshot"/);      // POST 적재
+  assert.match(history, /\/api\/snapshots/);                          // 목록
+  assert.match(history, /\/api\/snapshot\?week=/);                    // 주차 읽기
+  assert.match(history, /isWeekLabel/);                               // 주차 라벨 분기
+  assert.match(history, /getWeekInfo\(\)\.isoLabel/);                 // 현재 주차 라벨
+});
+
 test('depletion alert is wired to global navigation and dashboard', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
   const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');

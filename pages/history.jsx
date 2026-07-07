@@ -22,15 +22,20 @@ const HISTORY_CHANGE_META = {
   unchanged: { label: '동일', symbol: '=', tone: 'unchanged' },
 };
 
+// 주간 마감 스냅샷 라벨(YYYY-Www) 판별 — 조회 시점 로드 경로 분기용.
+const isWeekLabel = (name) => /^\d{4}-W\d{2}$/.test(String(name || ''));
+
 function HistoryPage({ ctx }) {
   const { data, notify } = ctx;
   const [backups, setBackups] = useState([]);
+  const [snapshots, setSnapshots] = useState([]); // 주간 마감 스냅샷(영구·주차 라벨)
   const [selected, setSelected] = useState('current');
   const [snapshot, setSnapshot] = useState(data);
   const [tab, setTab] = useState('injection');
   const [query, setQuery] = useState('');
   const [changesOnly, setChangesOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   const loadBackups = () => {
     fetch('/api/backups', { cache: 'no-store' })
@@ -45,7 +50,34 @@ function HistoryPage({ ctx }) {
       });
   };
 
-  useEffect(() => { loadBackups(); }, []);
+  const loadSnapshots = () => {
+    fetch('/api/snapshots', { cache: 'no-store' })
+      .then(r => {
+        if (!r.ok) throw new Error(`snapshots ${r.status}`);
+        return r.json();
+      })
+      .then(setSnapshots)
+      .catch(e => console.warn('snapshot list failed:', e));
+  };
+
+  const reloadAll = () => { loadBackups(); loadSnapshots(); };
+  useEffect(() => { reloadAll(); }, []);
+
+  // 이번 주 마감 — 현재 data를 그 주 ISO 라벨로 스냅샷 적재(멱등). History·추세의 기록.
+  const closeWeek = () => {
+    const label = DataService.getWeekInfo().isoLabel;
+    if (!confirm(`이번 주(${label})를 마감해 스냅샷으로 저장할까요?\n같은 주를 다시 마감하면 최신 내용으로 덮어씁니다.`)) return;
+    setClosing(true);
+    fetch('/api/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week: label, data }),
+    })
+      .then(r => { if (!r.ok) throw new Error(`snapshot ${r.status}`); return r.json(); })
+      .then(() => { notify(`${label} 주간 마감을 저장했습니다`); loadSnapshots(); })
+      .catch(e => { console.warn('week close failed:', e); notify('주간 마감 저장 실패'); })
+      .finally(() => setClosing(false));
+  };
 
   const selectSnapshot = (name) => {
     setQuery('');
@@ -56,9 +88,13 @@ function HistoryPage({ ctx }) {
       return;
     }
     setLoading(true);
-    fetch(`/api/backup?name=${encodeURIComponent(name)}`, { cache: 'no-store' })
+    // 주간 스냅샷(주차 라벨)과 백업(파일명)을 각기 다른 API로 로드.
+    const url = isWeekLabel(name)
+      ? `/api/snapshot?week=${encodeURIComponent(name)}`
+      : `/api/backup?name=${encodeURIComponent(name)}`;
+    fetch(url, { cache: 'no-store' })
       .then(r => {
-        if (!r.ok) throw new Error(`backup ${r.status}`);
+        if (!r.ok) throw new Error(`load ${r.status}`);
         return r.json();
       })
       .then(raw => {
@@ -66,7 +102,7 @@ function HistoryPage({ ctx }) {
         setSelected(name);
       })
       .catch(e => {
-        console.warn('backup load failed:', e);
+        console.warn('snapshot load failed:', e);
         notify('선택한 기록을 열지 못했습니다');
       })
       .finally(() => setLoading(false));
@@ -77,10 +113,12 @@ function HistoryPage({ ctx }) {
   }, [data, selected]);
 
   const summary = useMemo(() => summarizeSnapshot(snapshot), [snapshot]);
+  // 조회 시점 = 현재 + 주간 마감(주차 라벨·영구) + 백업(시각·최근 90). 주간을 먼저 노출.
   const backupOptions = useMemo(() => [
     { name: 'current', label: '현재 데이터' },
+    ...snapshots.map(s => ({ name: s.week, label: `주간 마감 · ${s.week}` })),
     ...backups.map(b => ({ name: b.name, label: formatBackupName(b.name) })),
-  ], [backups]);
+  ], [snapshots, backups]);
 
   const snapshotRows = useMemo(() => buildHistoryRows(snapshot, tab), [snapshot, tab]);
   const currentRows = useMemo(() => buildHistoryRows(data, tab), [data, tab]);
@@ -128,10 +166,13 @@ function HistoryPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">기록 조회</div>
-            <div className="page__meta">백업 시점의 사출계획, 잉크 생산계획, 재고 조사 내용을 현재 데이터와 비교</div>
+            <div className="page__meta">주간 마감·백업 시점의 사출계획, 잉크 생산계획, 재고 조사 내용을 현재 데이터와 비교</div>
           </div>
           <div className="page__actions">
-            <button className="btn" onClick={loadBackups}><Icon name="refresh" size={12} /> 새로고침</button>
+            <button className="btn btn--primary" onClick={closeWeek} disabled={closing} title="이번 주 계획·재고를 주차 라벨로 영구 보관(재마감 시 덮어씀)">
+              <Icon name="save" size={12} /> {closing ? '저장 중…' : '이번 주 마감'}
+            </button>
+            <button className="btn" onClick={reloadAll}><Icon name="refresh" size={12} /> 새로고침</button>
           </div>
         </div>
       </div>
