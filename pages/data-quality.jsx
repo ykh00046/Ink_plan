@@ -30,6 +30,9 @@ function DataQualityPage({ ctx }) {
     [data]
   );
 
+  // 마스터 현황 통계(경보 아님·read-only) — 비대한 잉크 마스터를 한눈에.
+  const stats = useMemo(() => DataService.buildMasterStats(data), [data]);
+
   const visibleIssues = useMemo(() => {
     let list = lint.issues;
     if (sevFilter !== 'all') list = list.filter(i => i.severity === sevFilter);
@@ -98,6 +101,30 @@ function DataQualityPage({ ctx }) {
       </div>
 
       <div className="page__body">
+        {/* 마스터 현황(경보 아님) — 등록 규모 대비 실사용을 보여줘 마스터 정리 판단을 돕는다 */}
+        <div className="dash-grid" style={{ marginBottom: 12 }}>
+          <div className="dash-card" style={{ cursor: 'default' }}>
+            <div className="dash-card__title">제품 마스터</div>
+            <div className="dash-card__value">{stats.products.toLocaleString()}</div>
+            <div className="dash-card__sub">동명 그룹 {stats.sameNameGroups}종(정상 구분 대상)</div>
+          </div>
+          <div className="dash-card" style={{ cursor: 'default' }}>
+            <div className="dash-card__title">잉크 마스터</div>
+            <div className="dash-card__value">{stats.inks.toLocaleString()}</div>
+            <div className="dash-card__sub">고유 잉크(정규화 기준)</div>
+          </div>
+          <div className="dash-card" style={{ cursor: 'default' }}>
+            <div className="dash-card__title">이번 사출에 실사용</div>
+            <div className="dash-card__value">{stats.inksUsedInInjection.toLocaleString()}</div>
+            <div className="dash-card__sub">나머지 {Math.max(0, stats.inks - stats.inksUsedInInjection).toLocaleString()}종은 현재 미사용</div>
+          </div>
+          <div className={`dash-card${stats.inksWithoutMachine > 0 ? ' dash-card--warn' : ''}`} style={{ cursor: 'default' }}>
+            <div className="dash-card__title">호기 미배정 잉크</div>
+            <div className="dash-card__value">{stats.inksWithoutMachine.toLocaleString()}</div>
+            <div className="dash-card__sub">{stats.inksWithoutMachine > 0 ? '가용일이 뜨지 않음 — 호기 지정 필요' : '모든 잉크에 호기 지정됨'}</div>
+          </div>
+        </div>
+
         {lint.summary.total === 0 ? (
           <div className="lint-empty">
             <Icon name="check" size={48} />
