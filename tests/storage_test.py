@@ -120,6 +120,52 @@ class StorageTest(unittest.TestCase):
             self.assertEqual(result[1].name, older.name)
 
 
+class WeekSnapshotTest(unittest.TestCase):
+    """주간 마감 스냅샷 아카이브 — 적재·목록·읽기·멱등·라벨 검증(traversal 차단)."""
+
+    def test_write_list_read_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                storage.write_week_snapshot("2026-W28", {"products": [{"id": "p_1"}]})
+                storage.write_week_snapshot("2026-W27", {"products": []})
+                weeks = [e["week"] for e in storage.list_week_snapshots()]
+                self.assertEqual(weeks, ["2026-W28", "2026-W27"])  # 최신 먼저
+                self.assertEqual(storage.read_week_snapshot("2026-W28")["products"][0]["id"], "p_1")
+
+    def test_write_defaults_to_current_db(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "db"; db.mkdir()
+            current = db / "current.json"
+            current.write_text(json.dumps({"v": 9, "inkPlan": []}), encoding="utf-8")
+            seed = Path(td) / "clean.json"; seed.write_text("{}", encoding="utf-8")
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"), \
+                 patch.object(storage, "DB_DIR", db), patch.object(storage, "CURRENT_FILE", current), \
+                 patch.object(storage, "SEED_FILE", seed):
+                storage.write_week_snapshot("2026-W28")  # data 생략 → 현재 DB
+                self.assertEqual(storage.read_week_snapshot("2026-W28")["v"], 9)
+
+    def test_write_is_idempotent_overwrite(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                storage.write_week_snapshot("2026-W28", {"n": 1})
+                storage.write_week_snapshot("2026-W28", {"n": 2})  # 재마감 덮어씀
+                self.assertEqual(storage.read_week_snapshot("2026-W28")["n"], 2)
+                self.assertEqual(len(storage.list_week_snapshots()), 1)
+
+    def test_invalid_week_label_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                for bad in ["2026W28", "../evil", "2026-28", "", "2026-W28/../x"]:
+                    with self.assertRaises(ValueError):
+                        storage.write_week_snapshot(bad, {})
+
+    def test_missing_snapshot_raises(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                with self.assertRaises(FileNotFoundError):
+                    storage.read_week_snapshot("2099-W01")
+
+
 class OptimisticConcurrencyTest(unittest.TestCase):
     """compute_rev / write_current_checked — 다중 탭 lost-update 방지(OCC)."""
 

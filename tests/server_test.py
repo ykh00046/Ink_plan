@@ -307,6 +307,65 @@ class DbRevisionTest(unittest.TestCase):
                     p.stop()
 
 
+class WeekSnapshotApiTest(unittest.TestCase):
+    """주간 스냅샷 API — POST 적재 / GET 목록·읽기 / 잘못된 주·부재 처리."""
+
+    def test_post_creates_and_get_reads_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            patches.append(patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"))
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps({"week": "2026-W28", "data": {"products": [{"id": "p_1"}]}}).encode("utf-8")
+                h, cap = make_post_handler(body, path="/api/snapshot")
+                h.do_POST()
+                self.assertEqual(cap["status"], 200)
+                self.assertEqual(cap["payload"]["week"], "2026-W28")
+
+                h2, cap2 = make_get_handler("/api/snapshots")
+                h2.do_GET()
+                self.assertEqual(cap2["status"], 200)
+                self.assertEqual([e["week"] for e in cap2["payload"]], ["2026-W28"])
+
+                h3, cap3 = make_get_handler("/api/snapshot?week=2026-W28")
+                h3.do_GET()
+                self.assertEqual(cap3["status"], 200)
+                self.assertEqual(cap3["payload"]["products"][0]["id"], "p_1")
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_post_bad_week_400(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            patches.append(patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"))
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps({"week": "../evil", "data": {}}).encode("utf-8")
+                h, cap = make_post_handler(body, path="/api/snapshot")
+                h.do_POST()
+                self.assertEqual(cap["status"], 400)
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_get_missing_snapshot_404(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            patches.append(patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"))
+            for p in patches:
+                p.start()
+            try:
+                h, cap = make_get_handler("/api/snapshot?week=2099-W01")
+                h.do_GET()
+                self.assertEqual(cap["status"], 404)
+            finally:
+                for p in patches:
+                    p.stop()
+
+
 class SeedApiTest(unittest.TestCase):
     """GET /api/seed — 시드(clean.json)를 정적 노출 대신 API 로 제공."""
 

@@ -389,6 +389,57 @@
     return { errorCount, notInMaster, noInks, show, tooltip };
   }
 
+  // 주간 스냅샷 목록에 해당 주차가 이미 마감(적재)돼 있는지. 마감 유도 표시의 단일 출처.
+  function isWeekArchived(snapshots, week) {
+    if (!week) return false;
+    return (snapshots || []).some(s => s && s.week === week);
+  }
+
+  // 마스터 규모·활용 인사이트(순수·read-only). 경보가 아니라 현황 통계 — 알람 피로 없이
+  // 비대한 잉크 마스터(등록 다수·실사용 소수)를 한눈에. data===null 안전.
+  function buildMasterStats(data) {
+    const d = data || {};
+    const products = d.products || [];
+    // 동명 그룹: 같은 이름을 2개 이상 제품이 공유 (정상 동명 구분 대상)
+    const nameCount = new Map();
+    for (const p of products) {
+      const n = p.name || '';
+      if (!n) continue;
+      nameCount.set(n, (nameCount.get(n) || 0) + 1);
+    }
+    let sameNameGroups = 0;
+    for (const c of nameCount.values()) if (c > 1) sameNameGroups++;
+
+    const inks = buildInkMaster(d);   // 고유 잉크(정규화 dedup)
+
+    // 현재 사출계획에 수요가 있는(=실사용) 잉크 수
+    const lookup = buildProductLookup(products);
+    const demand = buildDemandByInkDay(d.injection, lookup);
+    const used = new Set();
+    for (const [ink, byDay] of demand) {
+      let total = 0;
+      for (const c of byDay.values()) total += c;
+      if (total > 0) used.add(normalizeInkName(ink));
+    }
+
+    // 호기 배정된 잉크(정규화) — 미배정은 가용일이 뜨지 않음
+    const assigned = new Set();
+    for (const a of (d.machineAssignments || [])) {
+      const ink = inkOfAssignment(a);
+      if (ink && String(a.machine || '').trim()) assigned.add(normalizeInkName(ink));
+    }
+    let inksWithoutMachine = 0;
+    for (const ink of inks) if (!assigned.has(normalizeInkName(ink))) inksWithoutMachine++;
+
+    return {
+      products: products.length,
+      sameNameGroups,
+      inks: inks.length,
+      inksUsedInInjection: used.size,
+      inksWithoutMachine,
+    };
+  }
+
   // 잉크 부족 신호 수집(순수 코어): weeklyNeed < 0 = 월요일 현재고로 주간 총소요 불가.
   // 단일 출처 = computeInkMetrics().weeklyNeed → ink-plan 페이지 빨강 표시와 동일 기준.
   // weeklyNeed는 '월'요일에만 산출되며, 현재고 미입력 잉크는 null → 자동 제외(오탐 방지).
@@ -1860,6 +1911,8 @@
     buildChemicalRequestMeta,
     lintMasters,
     buildMasterHealthBadge,
+    buildMasterStats,
+    isWeekArchived,
     collectInkShortage,
     collectInkDepletionRisks,
     buildInkPlanningAlerts,

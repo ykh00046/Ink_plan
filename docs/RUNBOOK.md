@@ -48,6 +48,22 @@ API 키는 이 배포 폴더 안의 `data/settings.json`에 저장됩니다. 이
 
 작업 스케줄러 이름은 `InkPlanDailyBackup`입니다.
 
+## 오프사이트 백업 (권장 — PC 고장 대비)
+
+로컬 백업은 전부 이 PC 안(`data/backups/`)에 있으므로, PC가 고장나면 함께 사라집니다.
+매일 백업 뒤 외부 위치(네트워크 드라이브·클라우드 동기화 폴더·USB)로 자동 미러링하려면
+**목적지 한 곳만 지정**하면 됩니다. 둘 중 하나로 설정:
+
+1. 환경변수 — 시스템 환경변수에 `INK_PLAN_OFFSITE_DIR` 추가 (예: `D:\ink_plan_백업` 또는 `\\NAS\backup`)
+2. 설정 파일 — `data/settings.json`에 `"offsiteBackupDir": "D:\\ink_plan_백업"` 한 줄 추가
+
+지정하면 매일 18:30 백업 직후 자동으로 `<목적지>/ink_plan/`에 `current.json`과 최근 백업(최대 60개)이
+증분 복사됩니다. **미지정이거나 드라이브 미연결이면 조용히 건너뛰고 주 백업은 정상 동작**합니다.
+
+- 수동 실행/점검: `python scripts/offsite_backup.py` (또는 배포본에서 동일 스크립트)
+- 동작 기록: `data/logs/offsite.log`
+- 클라우드를 쓰면(예: OneDrive/드라이브 동기화 폴더를 목적지로 지정) 사실상 오프사이트 자동 보관이 됩니다.
+
 ## 수동 백업
 
 앱 우측 상단 설정 버튼을 열고 `데이터 백업 > 지금 백업`을 누릅니다.
