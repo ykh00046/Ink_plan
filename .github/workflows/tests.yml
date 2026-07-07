@@ -1,0 +1,32 @@
+name: tests
+
+# 하드닝·제품 정체성 회귀를 사람 손 없이 차단하는 게이트.
+# 의존성 없음(프론트=브라우저 Babel, 백엔드=Python 표준 라이브러리) → 설치 단계 불필요.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  node-tests:
+    name: Node 순수로직 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: node --test (data-service / ui-regressions / date-utils / extracted-logic / history-snapshot-diff)
+        run: npm test
+
+  python-tests:
+    name: Python 서버/저장소 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: unittest discover (server_test / storage_test / settings_store_test)
+        run: npm run test:py
