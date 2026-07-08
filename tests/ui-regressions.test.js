@@ -153,6 +153,13 @@ test('weekly snapshot: history page is wired to close + list + read APIs', () =>
   assert.match(history, /isWeekArchived/);                            // 이번 주 마감 상태 표시
 });
 
+test('review page shows source request image for verification', () => {
+  const review = fs.readFileSync(path.join(__dirname, '..', 'pages', 'review.jsx'), 'utf8');
+  assert.match(review, /ReviewSourceImage/);              // 원본 이미지 패널 컴포넌트
+  assert.match(review, /ocrResult\.sourceImageUrl/);      // data URL 소스 배선
+  assert.match(review, /showImage/);                       // 표시 토글
+});
+
 test('depletion alert is wired to global navigation and dashboard', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
   const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');

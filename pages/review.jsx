@@ -51,7 +51,7 @@ function ReviewEmptyState({ onGoOcr, onGoInjection }) {
 
 // ── sub-component: 페이지 헤더 + 진행률 바 ───────────────────────────────────
 
-function ReviewHeader({ ocrResult, shiftRowCount, stats, onApply, onClear }) {
+function ReviewHeader({ ocrResult, shiftRowCount, stats, onApply, onClear, hasImage, showImage, onToggleImage }) {
   const allShiftsOk = shiftRowCount['주간'] && shiftRowCount['야간'] && shiftRowCount['명일주간'];
   return (
     <div className="page__head">
@@ -71,6 +71,11 @@ function ReviewHeader({ ocrResult, shiftRowCount, stats, onApply, onClear }) {
           </div>
         </div>
         <div className="page__actions">
+          {hasImage && (
+            <button className="btn" onClick={onToggleImage} title="원본 요청서 이미지 표시/숨기기">
+              <Icon name="image" size={12} /> {showImage ? '이미지 숨기기' : '원본 이미지'}
+            </button>
+          )}
           <button className="btn" onClick={onClear}>
             <Icon name="trash" size={12} /> OCR 결과 비우기
           </button>
@@ -99,6 +104,48 @@ function ReviewHeader({ ocrResult, shiftRowCount, stats, onApply, onClear }) {
             : <span className="review-progress__stat review-progress__stat--done">✓ 미등록 없음</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── sub-component: 원본 요청서 이미지 대조 ───────────────────────────────────
+// OCR 정정은 원본과 대조해야 정확한데 그동안 이미지가 화면에 없었다(lint는 "대조하세요"만).
+// ocrResult.sourceImageUrl(업로드 data URL)을 검수 옆에 띄워 눈으로 확인하게 한다.
+
+function ReviewSourceImage({ url, fileName }) {
+  const [zoom, setZoom] = useState(false);
+  if (!url) return null;
+  return (
+    <div style={{ margin: '0 0 12px', border: '1px solid var(--ink-200)', borderRadius: 8, background: 'var(--ink-50)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 12, color: 'var(--ink-600)' }}>
+        <Icon name="image" size={13} /> 원본 요청서 — 정정 시 이미지와 대조하세요
+        {fileName && <span style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-500)' }}>{fileName}</span>}
+        <button className="btn btn--sm" style={{ marginLeft: fileName ? 8 : 'auto' }} onClick={() => setZoom(true)} title="크게 보기">
+          <Icon name="search" size={11} /> 확대
+        </button>
+      </div>
+      <div style={{ maxHeight: '42vh', overflow: 'auto', textAlign: 'center', background: 'var(--ink-100)' }}>
+        <img
+          src={url}
+          alt="원본 요청서"
+          style={{ maxWidth: '100%', cursor: 'zoom-in', display: 'inline-block' }}
+          onClick={() => setZoom(true)}
+        />
+      </div>
+      {zoom && (
+        <div
+          className="modal-overlay"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setZoom(false); }}
+          style={{ cursor: 'zoom-out', padding: 20 }}
+        >
+          <img
+            src={url}
+            alt="원본 요청서 확대"
+            style={{ maxWidth: '96vw', maxHeight: '92vh', objectFit: 'contain', boxShadow: '0 8px 40px rgba(0,0,0,.4)' }}
+            onClick={() => setZoom(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -273,6 +320,7 @@ function ReviewPage({ ctx }) {
   const [decisions, setDecisions] = useState({});
   const [filter, setFilter] = useState('pending'); // pending | all | done
   const [newProductDialog, setNewProductDialog] = useState(null); // { row } — 신규 등록 시 잉크 입력 모달
+  const [showImage, setShowImage] = useState(true); // 원본 요청서 대조 패널(기본 표시)
   const autoAppliedRef = useRef(false);
 
   // 초기화: exact는 auto match로 채움. 기존 사용자 결정은 보존(brand 인라인 편집 시 다른 row의 결정이 날아가지 않도록).
@@ -526,9 +574,16 @@ function ReviewPage({ ctx }) {
         stats={stats}
         onApply={handleApplyToInjection}
         onClear={() => setOcrResult(null)}
+        hasImage={!!ocrResult.sourceImageUrl}
+        showImage={showImage}
+        onToggleImage={() => setShowImage(s => !s)}
       />
 
       {ocrLint.length > 0 && <OcrLintPanel issues={ocrLint} />}
+
+      {showImage && ocrResult.sourceImageUrl && (
+        <ReviewSourceImage url={ocrResult.sourceImageUrl} fileName={ocrResult.sourceFileName} />
+      )}
 
       <div className="page__body">
         <ReviewTable
