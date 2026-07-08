@@ -1,6 +1,8 @@
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
+import os
+import re
 import socket
 import threading
 import traceback
@@ -34,6 +36,19 @@ from settings_store import read_settings, write_settings
 PORT = 8766
 URL = f"http://127.0.0.1:{PORT}/"
 
+# 바인딩 주소 — 기본은 로컬 전용(지금까지와 동일, 안전). 사내망 서버 PC에서만
+# 환경변수 INK_PLAN_BIND=0.0.0.0 으로 켜서 다른 PC의 브라우저 접속을 허용한다.
+# 기본값이 로컬이라 이 변경은 명시적으로 켜지 않는 한 보안을 낮추지 않는다.
+BIND_HOST = (os.environ.get("INK_PLAN_BIND") or "127.0.0.1").strip() or "127.0.0.1"
+LAN_MODE = BIND_HOST not in ("127.0.0.1", "localhost")
+# 사설 LAN 대역(RFC1918) — LAN 모드에서만 Host/Origin 허용에 사용. 공인 도메인/IP는 계속 거부
+# → DNS rebinding(공격자 도메인) 방어는 LAN 모드에서도 유지된다.
+_PRIVATE_IP_RE = re.compile(
+    r"^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$"
+)
+
 # 런타임 데이터(API 키/DB/백업/시드)는 정적 파일로 노출 금지 — /api/* 로만 접근.
 # deny-by-default: data/ 트리 전체 차단. 시드(clean.json)도 /api/seed 로만 제공.
 # 차단 판정은 translate_path() 결과(실제 열리는 파일 경로) 기준 — is_blocked_static 참고.
@@ -42,6 +57,34 @@ BLOCKED_DATA_DIRNAME = "data"
 MAX_BODY_BYTES = 64 * 1024 * 1024
 # /api/* 는 로컬 동일 출처에서만 허용 — DNS rebinding(키 유출) / CSRF(데이터 덮어쓰기) 차단
 ALLOWED_HOSTS = (f"127.0.0.1:{PORT}", f"localhost:{PORT}", "127.0.0.1", "localhost")
+
+
+def _host_allowed(host):
+    # 허용 Host/Origin 판정 단일 출처. 로컬은 항상 허용, LAN 모드에선 사설 IP:PORT 도 허용,
+    # 공인 도메인/IP·포트 불일치는 거부(rebinding/CSRF 방어 유지).
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if host in ALLOWED_HOSTS:
+        return True
+    if LAN_MODE:
+        hostname, _, port = host.partition(":")
+        if (port or str(PORT)) == str(PORT) and _PRIVATE_IP_RE.match(hostname):
+            return True
+    return False
+
+
+def local_lan_ip():
+    # 이 PC의 LAN IP(다른 PC가 접속할 주소) 조회 — 실패 시 None.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except OSError:
+        return None
 
 
 def port_is_open():
@@ -83,17 +126,15 @@ class Handler(SimpleHTTPRequestHandler):
         return raw.strip().strip('"') if raw else None
 
     def is_api_request_allowed(self):
-        # Host 헤더가 로컬이 아니면 거부 (DNS rebinding 방어 — 공격자 도메인이 127.0.0.1로
-        # 리바인딩돼도 Host 는 공격자 도메인이라 차단됨).
-        host = (self.headers.get("Host") or "").strip().lower()
-        # 빈/누락 Host 도 거부 — 비브라우저 클라이언트의 Host 누락 차단(방어 강화).
-        # 브라우저 fetch 는 항상 Host 를 전송하므로 정상 경로 영향 없음.
-        if host not in ALLOWED_HOSTS:
+        # Host 헤더가 허용 대상이 아니면 거부 (DNS rebinding 방어 — 공격자 도메인이
+        # 로컬/사설IP로 리바인딩돼도 Host 는 공격자 도메인이라 차단됨).
+        # 빈/누락 Host 도 거부(비브라우저 클라이언트 방어). LAN 모드면 사설 IP Host 도 허용.
+        if not _host_allowed(self.headers.get("Host")):
             return False
-        # Origin 이 있으면(=다른 사이트의 fetch 등) 로컬 출처와 일치해야 함 (CSRF 방어).
+        # Origin 이 있으면(=다른 사이트의 fetch 등) 허용 출처와 일치해야 함 (CSRF 방어).
         origin = self.headers.get("Origin")
         if origin:
-            if urlparse(origin).netloc.lower() not in ALLOWED_HOSTS:
+            if not _host_allowed(urlparse(origin).netloc):
                 return False
         return True
 
@@ -296,11 +337,25 @@ def open_app():
 def create_server():
     create_backup("startup")
     prune_backups()
-    return ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    return ThreadingHTTPServer((BIND_HOST, PORT), Handler)
+
+
+def print_startup_banner():
+    # LAN 모드면 다른 PC가 접속할 주소를 콘솔에 안내(bat 창에서 바로 확인).
+    if LAN_MODE:
+        ip = local_lan_ip() or "<이 PC IP>"
+        print("=" * 52, flush=True)
+        print(f"  [LAN 모드] 다른 PC 브라우저에서 접속:", flush=True)
+        print(f"    http://{ip}:{PORT}/", flush=True)
+        print(f"  (bind {BIND_HOST} · 방화벽에서 {PORT} 인바운드 허용 필요)", flush=True)
+        print("=" * 52, flush=True)
+    else:
+        print(f"서버 시작: {URL} (로컬 전용)", flush=True)
 
 
 def run_forever(open_browser=True):
     httpd = create_server()
+    print_startup_banner()
     if open_browser:
         threading.Timer(0.5, open_app).start()
     httpd.serve_forever()
@@ -318,9 +373,12 @@ def run_in_thread(open_browser=True):
 
 def main():
     if port_is_open():
-        open_app()
+        # 이미 실행 중 — 로컬 모드면 브라우저만 다시 열고, LAN(서버) 모드면 조용히 종료.
+        if not LAN_MODE:
+            open_app()
         return
-    run_forever(open_browser=True)
+    # LAN(서버) 모드에선 서버 PC에 브라우저를 띄우지 않는다(헤드리스 운영).
+    run_forever(open_browser=not LAN_MODE)
 
 
 if __name__ == "__main__":

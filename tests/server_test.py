@@ -111,6 +111,39 @@ class ApiGuardTest(unittest.TestCase):
         self.assertFalse(h.is_api_request_allowed())
 
 
+class LanModeHostTest(unittest.TestCase):
+    """LAN(서버) 모드 Host 허용 — 사설IP만 허용, 공인/포트불일치/도메인 거부(rebinding 방어 유지)."""
+
+    def test_private_ip_allowed_only_in_lan_mode(self):
+        host = f"192.168.200.106:{server.PORT}"
+        with patch.object(server, "LAN_MODE", False):
+            self.assertFalse(server._host_allowed(host))   # 로컬 모드: 사설IP 거부
+        with patch.object(server, "LAN_MODE", True):
+            self.assertTrue(server._host_allowed(host))
+            self.assertTrue(server._host_allowed(f"10.0.0.5:{server.PORT}"))
+            self.assertTrue(server._host_allowed(f"172.20.3.9:{server.PORT}"))
+
+    def test_non_private_and_wrong_port_blocked_in_lan_mode(self):
+        with patch.object(server, "LAN_MODE", True):
+            self.assertFalse(server._host_allowed("evil.com"))                  # 공인 도메인(rebinding)
+            self.assertFalse(server._host_allowed(f"8.8.8.8:{server.PORT}"))    # 공인 IP
+            self.assertFalse(server._host_allowed(f"172.15.0.1:{server.PORT}")) # 사설 아님
+            self.assertFalse(server._host_allowed("192.168.1.50:9999"))         # 포트 불일치
+            self.assertFalse(server._host_allowed(""))                           # 빈 Host
+
+    def test_lan_mode_api_request_allowed_via_handler(self):
+        # 실 핸들러 경로: LAN 모드에서 사설IP Host 는 /api/* 허용, 공인은 거부.
+        with patch.object(server, "LAN_MODE", True):
+            self.assertTrue(make_handler({"Host": f"192.168.1.7:{server.PORT}"}).is_api_request_allowed())
+            self.assertFalse(make_handler({"Host": "evil.com"}).is_api_request_allowed())
+
+    def test_localhost_always_allowed(self):
+        for lan in (False, True):
+            with patch.object(server, "LAN_MODE", lan):
+                self.assertTrue(server._host_allowed(f"127.0.0.1:{server.PORT}"))
+                self.assertTrue(server._host_allowed(f"localhost:{server.PORT}"))
+
+
 class BlockedStaticTest(unittest.TestCase):
     """is_blocked_static — 런타임 데이터(키/DB/백업) 정적 노출 차단."""
 
