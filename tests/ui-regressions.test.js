@@ -151,6 +151,9 @@ test('weekly snapshot: history page is wired to close + list + read APIs', () =>
   assert.match(history, /isWeekLabel/);                               // 주차 라벨 분기
   assert.match(history, /getWeekInfo\(\)\.isoLabel/);                 // 현재 주차 라벨
   assert.match(history, /isWeekArchived/);                            // 이번 주 마감 상태 표시
+  assert.match(history, /buildWeeklyInkSummary/);                      // 마감 시 소비 요약 적재
+  assert.match(history, /\/api\/snapshot-summaries/);                 // 추세 로드
+  assert.match(history, /buildInkConsumptionTrend/);                   // 추세 계산
 });
 
 test('depletion alert is wired to global navigation and dashboard', () => {
@@ -162,6 +165,14 @@ test('depletion alert is wired to global navigation and dashboard', () => {
   assert.match(app, /inkDepletion\.items/);
   assert.match(dashboard, /title="잉크 소진 임박"/);
   assert.match(dashboard, /availableDays/);
+});
+
+test('dashboard nudges to close the week when this week is not archived', () => {
+  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
+  assert.match(dashboard, /\/api\/snapshots/);          // 마감 여부 조회
+  assert.match(dashboard, /isWeekArchived/);            // 판정
+  assert.match(dashboard, /weekClosed/);                // 미마감 시에만 넛지
+  assert.match(dashboard, /setView\('history'\)/);      // 마감하러 이동
 });
 
 test('relabel belongs only to its original lot row', () => {

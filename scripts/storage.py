@@ -318,6 +318,32 @@ def read_week_snapshot(week_label):
     return read_json(path)
 
 
+# 주간 잉크 소비 요약 인덱스 — 마감 시 함께 적재. 전체 스냅샷 재독 없이 추세 산출.
+# 파일명(_summaries)은 _WEEK_RE 에 안 걸려 스냅샷 목록에서 자동 제외됨.
+def _summaries_path():
+    return ARCHIVE_DIR / "_summaries.json"
+
+
+def read_week_summaries():
+    path = _summaries_path()
+    if not path.exists():
+        return {}
+    try:
+        data = read_json(path)
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_week_summary(week_label, summary):
+    with _LOCK:
+        _week_path(week_label)   # 라벨 검증(불량 시 ValueError)
+        data = read_week_summaries()
+        data[week_label] = summary
+        write_json_atomic(_summaries_path(), data)
+        return week_label
+
+
 def prune_backups(keep=90, keep_startup=20):
     # 매 실행마다 쌓이는 startup 백업이 manual/before_*/scheduled 같은 의미 있는
     # 스냅샷을 조기에 밀어내지 않도록 분리 보존한다.

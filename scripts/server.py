@@ -24,6 +24,8 @@ from storage import (
     write_week_snapshot,
     list_week_snapshots,
     read_week_snapshot,
+    write_week_summary,
+    read_week_summaries,
 )
 from settings_store import read_settings, write_settings
 
@@ -180,6 +182,10 @@ class Handler(SimpleHTTPRequestHandler):
             # 주간 마감 스냅샷 목록(최신순) — History 조회 진입점.
             self.send_json(list_week_snapshots())
             return
+        if path == "/api/snapshot-summaries":
+            # 주별 잉크 소비 요약 인덱스 — 소비 추세용(전체 스냅샷 재독 없이).
+            self.send_json(read_week_summaries())
+            return
         if path == "/api/snapshot":
             week = (parse_qs(parsed.query).get("week") or [""])[0]
             try:
@@ -246,6 +252,10 @@ class Handler(SimpleHTTPRequestHandler):
                 week = body.get("week")
                 try:
                     label, _ = write_week_snapshot(week, body.get("data"))
+                    # 소비 요약이 함께 오면 인덱스에 적재(추세용). 없으면 스냅샷만.
+                    summary = body.get("summary")
+                    if isinstance(summary, dict):
+                        write_week_summary(label, summary)
                 except ValueError:
                     self.send_json({"error": "bad week"}, 400)
                     return

@@ -29,6 +29,7 @@ function HistoryPage({ ctx }) {
   const { data, notify } = ctx;
   const [backups, setBackups] = useState([]);
   const [snapshots, setSnapshots] = useState([]); // 주간 마감 스냅샷(영구·주차 라벨)
+  const [summaries, setSummaries] = useState(null); // 주별 잉크 소비 요약(소비 추세용, lazy)
   const [selected, setSelected] = useState('current');
   const [snapshot, setSnapshot] = useState(data);
   const [tab, setTab] = useState('injection');
@@ -60,8 +61,18 @@ function HistoryPage({ ctx }) {
       .catch(e => console.warn('snapshot list failed:', e));
   };
 
+  const loadSummaries = () => {
+    fetch('/api/snapshot-summaries', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : {}))
+      .then(setSummaries)
+      .catch(() => setSummaries({}));
+  };
+
   const reloadAll = () => { loadBackups(); loadSnapshots(); };
   useEffect(() => { reloadAll(); }, []);
+  // 소비 추세 탭 진입 시에만 요약 로드(lazy).
+  useEffect(() => { if (tab === 'trend' && summaries === null) loadSummaries(); }, [tab, summaries]);
+  const trend = useMemo(() => DataService.buildInkConsumptionTrend(summaries || {}), [summaries]);
 
   // 이번 주 마감 여부 — 안 쓰면 History가 비니, 마감을 유도하는 상태 표시.
   const thisWeek = useMemo(() => DataService.getWeekInfo().isoLabel, []);
@@ -75,10 +86,10 @@ function HistoryPage({ ctx }) {
     fetch('/api/snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ week: label, data }),
+      body: JSON.stringify({ week: label, data, summary: DataService.buildWeeklyInkSummary(data) }),
     })
       .then(r => { if (!r.ok) throw new Error(`snapshot ${r.status}`); return r.json(); })
-      .then(() => { notify(`${label} 주간 마감을 저장했습니다`); loadSnapshots(); })
+      .then(() => { notify(`${label} 주간 마감을 저장했습니다`); loadSnapshots(); loadSummaries(); })
       .catch(e => { console.warn('week close failed:', e); notify('주간 마감 저장 실패'); })
       .finally(() => setClosing(false));
   };
@@ -241,16 +252,19 @@ function HistoryPage({ ctx }) {
                   { value: 'injection', label: '사출계획' },
                   { value: 'ink', label: '잉크 생산계획' },
                   { value: 'inventory', label: '재고 조사' },
+                  { value: 'trend', label: '소비 추세' },
                 ]}
               />
-              <input
-                className="input input--search"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="기록 안에서 검색"
-                style={{ minWidth: 220 }}
-              />
-              {comparing && (
+              {tab !== 'trend' && (
+                <input
+                  className="input input--search"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="기록 안에서 검색"
+                  style={{ minWidth: 220 }}
+                />
+              )}
+              {tab !== 'trend' && comparing && (
                 <label className="history-change-filter">
                   <input
                     type="checkbox"
@@ -262,11 +276,14 @@ function HistoryPage({ ctx }) {
               )}
               <div className="spacer" />
               <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>
-                {loading ? '불러오는 중...' : `${filtered.length}건`}
+                {tab === 'trend'
+                  ? `${trend.weeks.length}주 · 잉크 ${trend.inks.length}종`
+                  : (loading ? '불러오는 중...' : `${filtered.length}건`)}
               </span>
             </div>
 
             <div className="tbl-wrap history-table-wrap">
+              {tab === 'trend' && <TrendTable trend={trend} />}
               {tab === 'injection' && <HistoryTable comparing={comparing} rows={filtered} columns={[
                 ['floor', '층'], ['machine', '사출기'], ['day', '요일'], ['shift', '구분'], ['value', '제품'],
               ]} empty={changesOnly ? filteredEmpty : '저장된 사출 배정이 없습니다'} />}
@@ -318,6 +335,47 @@ function HistoryTable({ rows, columns, empty, comparing }) {
         })}
         {rows.length === 0 && (
           <tr><td colSpan={columns.length + (comparing ? 2 : 0)} className="muted" style={{ textAlign: 'center', padding: 40 }}>{empty}</td></tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+// 소비 추세 — 주차 × 잉크 소요(마감 시 적재된 요약 기반). 상위 50종만 표시.
+function TrendTable({ trend }) {
+  const weeks = trend.weeks || [];
+  const inks = (trend.inks || []).slice(0, 50);
+  if (weeks.length === 0) {
+    return (
+      <div className="empty-state" style={{ padding: 40 }}>
+        <div className="empty-state__title">아직 소비 추세 데이터가 없습니다</div>
+        <div className="empty-state__hint">'이번 주 마감'을 누를 때마다 그 주 잉크 소요가 여기에 누적됩니다. 몇 주 쌓이면 잉크별 추세가 보입니다.</div>
+      </div>
+    );
+  }
+  return (
+    <table className="tbl history-table">
+      <thead>
+        <tr>
+          <th style={{ minWidth: 140 }}>잉크</th>
+          {weeks.map(w => <th key={w} style={{ textAlign: 'right', width: 92 }}>{w}</th>)}
+          <th style={{ textAlign: 'right', width: 80 }}>합계</th>
+        </tr>
+      </thead>
+      <tbody>
+        {inks.map(row => (
+          <tr key={row.ink}>
+            <td style={{ fontWeight: 600 }}>{row.ink}</td>
+            {row.points.map((p, i) => (
+              <td key={i} style={{ textAlign: 'right', color: p > 0 ? undefined : 'var(--ink-300)' }}>
+                {p > 0 ? p.toLocaleString() : '·'}
+              </td>
+            ))}
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.sum.toLocaleString()}</td>
+          </tr>
+        ))}
+        {inks.length === 0 && (
+          <tr><td colSpan={weeks.length + 2} className="muted" style={{ textAlign: 'center', padding: 40 }}>마감된 주에 잉크 소요가 없습니다</td></tr>
         )}
       </tbody>
     </table>

@@ -165,6 +165,23 @@ class WeekSnapshotTest(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError):
                     storage.read_week_snapshot("2099-W01")
 
+    def test_week_summary_write_merge_read(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                self.assertEqual(storage.read_week_summaries(), {})   # 부재 시 빈 맵
+                storage.write_week_summary("2026-W27", {"byInk": {"INK1": 5}})
+                storage.write_week_summary("2026-W28", {"byInk": {"INK1": 3}})
+                storage.write_week_summary("2026-W27", {"byInk": {"INK1": 6}})  # 병합 덮어씀
+                got = storage.read_week_summaries()
+                self.assertEqual(set(got), {"2026-W27", "2026-W28"})
+                self.assertEqual(got["2026-W27"]["byInk"]["INK1"], 6)
+
+    def test_week_summary_bad_label_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"):
+                with self.assertRaises(ValueError):
+                    storage.write_week_summary("../evil", {"byInk": {}})
+
 
 class OptimisticConcurrencyTest(unittest.TestCase):
     """compute_rev / write_current_checked — 다중 탭 lost-update 방지(OCC)."""

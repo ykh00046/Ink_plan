@@ -336,6 +336,30 @@ class WeekSnapshotApiTest(unittest.TestCase):
                 for p in patches:
                     p.stop()
 
+    def test_post_with_summary_and_get_summaries(self):
+        with tempfile.TemporaryDirectory() as td:
+            patches, current = _patch_storage(td, {"v": 1})
+            patches.append(patch.object(storage, "ARCHIVE_DIR", Path(td) / "archive"))
+            for p in patches:
+                p.start()
+            try:
+                body = json.dumps({
+                    "week": "2026-W28",
+                    "data": {"products": []},
+                    "summary": {"byInk": {"INK1": 7}},
+                }).encode("utf-8")
+                h, cap = make_post_handler(body, path="/api/snapshot")
+                h.do_POST()
+                self.assertEqual(cap["status"], 200)
+
+                h2, cap2 = make_get_handler("/api/snapshot-summaries")
+                h2.do_GET()
+                self.assertEqual(cap2["status"], 200)
+                self.assertEqual(cap2["payload"]["2026-W28"]["byInk"]["INK1"], 7)
+            finally:
+                for p in patches:
+                    p.stop()
+
     def test_post_bad_week_400(self):
         with tempfile.TemporaryDirectory() as td:
             patches, current = _patch_storage(td, {"v": 1})
