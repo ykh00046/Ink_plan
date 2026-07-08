@@ -116,15 +116,22 @@ function ReviewSourceImage({ url, fileName }) {
   const [zoom, setZoom] = useState(false);
   if (!url) return null;
   return (
-    <div style={{ margin: '0 0 12px', border: '1px solid var(--ink-200)', borderRadius: 8, background: 'var(--ink-50)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 12, color: 'var(--ink-600)' }}>
-        <Icon name="image" size={13} /> 원본 요청서 — 정정 시 이미지와 대조하세요
-        {fileName && <span style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-500)' }}>{fileName}</span>}
-        <button className="btn btn--sm" style={{ marginLeft: fileName ? 8 : 'auto' }} onClick={() => setZoom(true)} title="크게 보기">
+    <div className="review-source" style={{ border: '1px solid var(--ink-200)', borderRadius: 8, background: 'var(--ink-50)', overflow: 'hidden' }}>
+      {/* 340px 좁은 폭 — 라벨은 nowrap로 고정, 파일명은 남는 폭에서 말줄임 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, color: 'var(--ink-600)' }}>
+        <Icon name="image" size={13} />
+        <span style={{ whiteSpace: 'nowrap', fontWeight: 600 }} title="정정 시 이미지와 대조하세요">원본 요청서</span>
+        {fileName && (
+          <span
+            style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-500)' }}
+            title={fileName}
+          >{fileName}</span>
+        )}
+        <button className="btn btn--sm" style={{ flex: 'none', marginLeft: fileName ? 0 : 'auto' }} onClick={() => setZoom(true)} title="크게 보기">
           <Icon name="search" size={11} /> 확대
         </button>
       </div>
-      <div style={{ maxHeight: '42vh', overflow: 'auto', textAlign: 'center', background: 'var(--ink-100)' }}>
+      <div className="review-source__view" style={{ overflow: 'auto', textAlign: 'center', background: 'var(--ink-100)' }}>
         <img
           src={url}
           alt="원본 요청서"
@@ -581,26 +588,33 @@ function ReviewPage({ ctx }) {
 
       {ocrLint.length > 0 && <OcrLintPanel issues={ocrLint} />}
 
-      {showImage && ocrResult.sourceImageUrl && (
-        <ReviewSourceImage url={ocrResult.sourceImageUrl} fileName={ocrResult.sourceFileName} />
-      )}
-
       <div className="page__body">
-        <ReviewTable
-          filteredRows={filteredRows}
-          stats={stats}
-          filter={filter}
-          setFilter={setFilter}
-          groupDecision={groupDecision}
-          allBrands={allBrands}
-          onNew={handleNew}
-          onUndo={handleUndo}
-          onBrandChange={updateGroupBrand}
-          onFixMaster={fixMasterBrand}
-          onMachineChange={updateGroupMachine}
-          onProductChange={updateGroupProduct}
-          onPick={pickCandidate}
-        />
+        {/* 표(정정)와 원본 이미지(대조)를 좌우 2단으로. 이미지는 sticky라
+            행을 정정하며 스크롤해도 옆에 계속 보인다. */}
+        <div className="review-split">
+          <div className="review-split__main">
+            <ReviewTable
+              filteredRows={filteredRows}
+              stats={stats}
+              filter={filter}
+              setFilter={setFilter}
+              groupDecision={groupDecision}
+              allBrands={allBrands}
+              onNew={handleNew}
+              onUndo={handleUndo}
+              onBrandChange={updateGroupBrand}
+              onFixMaster={fixMasterBrand}
+              onMachineChange={updateGroupMachine}
+              onProductChange={updateGroupProduct}
+              onPick={pickCandidate}
+            />
+          </div>
+          {showImage && ocrResult.sourceImageUrl && (
+            <aside className="review-split__aside">
+              <ReviewSourceImage url={ocrResult.sourceImageUrl} fileName={ocrResult.sourceFileName} />
+            </aside>
+          )}
+        </div>
       </div>
 
       {newProductDialog && (

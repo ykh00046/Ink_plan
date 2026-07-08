@@ -1259,6 +1259,38 @@ button { background: none; border: none; cursor: pointer; }
   max-height: calc(100vh - 240px);
 }
 .tbl-wrap--in-card { max-height: calc(100vh - 320px); }
+
+/* ── 검수: 표(정정) + 원본 요청서 이미지(대조) 좌우 2단 ───────────────
+   이미지는 sticky라 행을 정정하며 스크롤해도 옆에 계속 보인다. */
+.review-split {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.review-split__main {
+  flex: 1 1 auto;
+  min-width: 0; /* flex 아이템이 .tbl-wrap 가로 스크롤을 허용하도록 */
+}
+.review-split__aside {
+  flex: 0 0 340px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: calc(100vh - 130px);
+}
+.review-source { display: flex; flex-direction: column; max-height: calc(100vh - 130px); }
+.review-source__view { flex: 1; min-height: 0; max-height: calc(100vh - 180px); }
+/* 좁은 화면에서는 세로로 스택 (2단 폭 부족) */
+@media (max-width: 1100px) {
+  .review-split { flex-direction: column; }
+  .review-split__aside {
+    flex-basis: auto;
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+  .review-source, .review-source__view { max-height: 42vh; }
+}
 .tbl-wrap .tbl th.sticky-col,
 .tbl-wrap .tbl td.sticky-col {
   position: sticky;
