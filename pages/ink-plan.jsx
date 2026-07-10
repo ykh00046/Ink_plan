@@ -290,22 +290,19 @@ function InkPlanPage({ ctx }) {
     [merged, demandByInkDay, inventoryByInkDay],
   );
 
+  // 엄격 기준(2026-07): 사출계획 소요량이 있는 잉크만 목록에 넣는다.
+  // 재고조사·전날 carry 로 채워진 stock 이나 수동 현재고/제조량만으로는 표시하지 않는다
+  // — 재고조사엔 있으나 사출계획엔 없는(소요량 0) 잉크가 생산계획에 섞이던 문제 해결.
+  // (availableDays/weeklyNeed 는 required>0(또는 주간 총소요>0)일 때만 non-null 이라 소요량 신호와 동치)
   const hasDayData = (ink, dList) => {
     const computed = computedByInk.get(ink.name);
     for (const d of dList) {
-      const dd = ink.days[d];
       const metrics = computed?.get(d);
       if (metrics && (
-        metrics.stock !== null ||
-        metrics.required ||
+        metrics.required > 0 ||
         metrics.availableDays !== null ||
         metrics.weeklyNeed !== null
       )) return true;
-      if (!dd) continue;
-      for (const k of ['현재고', '제조량']) {
-        const v = dd[k];
-        if (v !== null && v !== undefined && v !== '' && v !== 0) return true;
-      }
     }
     return false;
   };
