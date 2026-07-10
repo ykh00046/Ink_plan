@@ -30,6 +30,7 @@ const buildAutoAssignCandidates= DataService.buildAutoAssignCandidates;
 function InkPlanToolbar({
   search, setSearch, dayFilter, setDayFilter, today, threeDays,
   showTestOnly, setShowTestOnly, testCount, filteredCount,
+  sortBy, setSortBy, sortDir, setSortDir,
 }) {
   return (
     <div className="toolbar">
@@ -57,6 +58,23 @@ function InkPlanToolbar({
       >
         <Icon name="flask" size={11} /> 테스트만 ({testCount})
       </button>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8, fontSize: 12, color: 'var(--ink-600)' }}>
+        정렬
+        <select className="input select" value={sortBy} onChange={e => setSortBy(e.target.value)} title="정렬 기준">
+          <option value="urgent">급한순(가용)</option>
+          <option value="machine">호기</option>
+          <option value="name">잉크명</option>
+          <option value="stock">재고</option>
+          <option value="avail">가용(당일)</option>
+        </select>
+        <button
+          className="btn btn--sm"
+          onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+          title={sortDir === 'asc' ? '오름차순 (▲)' : '내림차순 (▼)'}
+        >
+          {sortDir === 'asc' ? '▲' : '▼'}
+        </button>
+      </label>
       <div className="spacer" />
       <span className="inkplan-legend" title="재고 조사 페이지에서 자동으로 채워진 재고 (Lot 합산)">
         <span className="inkplan-legend__swatch" /> 재고 조사 연동
@@ -228,6 +246,8 @@ function InkPlanPage({ ctx }) {
   const [search, setSearch] = useState('');
   const [dayFilter, setDayFilter] = useState('3days'); // all | today | 3days
   const [showTestOnly, setShowTestOnly] = useState(false);
+  const [sortBy, setSortBy] = useState('urgent'); // urgent | machine | name | stock | avail
+  const [sortDir, setSortDir] = useState('asc');
   const [showAutoAssign, setShowAutoAssign] = useState(false);
 
   const days = INKPLAN_DAYS;
@@ -318,20 +338,36 @@ function InkPlanPage({ ctx }) {
     } else if (dayFilter !== 'all') {
       list = list.filter(ink => ink.isTest || hasDayData(ink, visibleDays));
     }
-    return [...list].sort((a, b) => {
-      if (a.isTest !== b.isTest) return a.isTest ? 1 : -1;
-      const minAvail = (ink) => {
-        let m = 999;
-        const computed = computedByInk.get(ink.name);
-        for (const d of visibleDays) {
-          const v = computed?.get(d)?.availableDays;
-          if (v != null && !isNaN(Number(v))) m = Math.min(m, Number(v));
+    // 재고·가용 정렬 기준일: 당일(안 보이면 표시된 첫 날)
+    const repDay = visibleDays.includes(today) ? today : visibleDays[0];
+    const num = (v) => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
+    // 정렬키 — string(잉크명) 또는 number, 값 없으면 null(항상 맨 아래)
+    const keyOf = (ink) => {
+      const c = computedByInk.get(ink.name);
+      switch (sortBy) {
+        case 'name': return ink.name || '';
+        case 'machine': { const n = parseInt(inkToMachine.get(ink.name) || '', 10); return isNaN(n) ? null : n; }
+        case 'stock': return num(c?.get(repDay)?.stock);
+        case 'avail': return num(c?.get(repDay)?.availableDays);
+        case 'urgent':
+        default: { // 표시일 중 가용 최소값(급한 순)
+          let m = Infinity;
+          for (const d of visibleDays) { const v = num(c?.get(d)?.availableDays); if (v != null) m = Math.min(m, v); }
+          return m === Infinity ? null : m;
         }
-        return m;
-      };
-      return minAvail(a) - minAvail(b);
+      }
+    };
+    return [...list].sort((a, b) => {
+      if (a.isTest !== b.isTest) return a.isTest ? 1 : -1; // TEST(양산대응)는 정렬 무관하게 맨 아래
+      const ka = keyOf(a), kb = keyOf(b);
+      if (ka == null && kb == null) return (a.name || '').localeCompare(b.name || '', 'ko');
+      if (ka == null) return 1;   // 값 없음은 방향과 무관하게 아래로
+      if (kb == null) return -1;
+      let cmp = typeof ka === 'string' ? ka.localeCompare(kb, 'ko') : ka - kb;
+      if (cmp === 0) cmp = (a.name || '').localeCompare(b.name || '', 'ko'); // 동점은 잉크명
+      return sortDir === 'desc' ? -cmp : cmp;
     });
-  }, [merged, search, showTestOnly, dayFilter, visibleDays, computedByInk]);
+  }, [merged, search, showTestOnly, dayFilter, visibleDays, computedByInk, sortBy, sortDir, today, inkToMachine]);
 
   const updateCell = (inkName, day, key, raw) => {
     const newData = { ...data };
@@ -430,6 +466,10 @@ function InkPlanPage({ ctx }) {
             setShowTestOnly={setShowTestOnly}
             testCount={testCount}
             filteredCount={filtered.length}
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            sortDir={sortDir}
+            setSortDir={setSortDir}
           />
 
           <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 300px)' }}>
@@ -481,7 +521,13 @@ function InkPlanPage({ ctx }) {
                   />
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40 }}>조건에 맞는 잉크가 없습니다</td></tr>
+                  <tr><td colSpan="100" className="muted" style={{ textAlign: 'center', padding: 40, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                    {search ? '검색 결과가 없습니다'
+                      : showTestOnly ? '테스트 잉크가 없습니다'
+                      : dayFilter !== 'all'
+                        ? `이 기간(${visibleDays.join('·')})에 사출계획 소요량이 있는 잉크가 없습니다.\n전체(월~일) 필터로 전체를 보거나 사출계획을 먼저 확인하세요.`
+                        : '표시할 잉크가 없습니다'}
+                  </td></tr>
                 )}
               </tbody>
             </table>
