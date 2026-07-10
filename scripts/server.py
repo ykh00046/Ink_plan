@@ -358,7 +358,13 @@ def run_forever(open_browser=True):
     print_startup_banner()
     if open_browser:
         threading.Timer(0.5, open_app).start()
-    httpd.serve_forever()
+    # Ctrl+C(KeyboardInterrupt)는 정상 종료 — traceback 대신 안내만 찍고 소켓 정리.
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n서버를 종료합니다.", flush=True)
+    finally:
+        httpd.server_close()
     return httpd
 
 
