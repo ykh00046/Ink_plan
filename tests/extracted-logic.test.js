@@ -264,38 +264,50 @@ test('computeInkMetrics: availableDays(round1)·weeklyNeed(월·차주월 포함
   assert.equal(tue.weeklyNeed, null);   // 월이 아니면 null
 });
 
-test('computeInkMetrics: stock null이면 availableDays/weeklyNeed/carry 모두 null 전파', () => {
+test('computeInkMetrics: 사출계획에 쓰이는데 재고조사 없는 잉크는 시작 재고 0으로 채움', () => {
+  // 소요 있고(active) 재고조사·수동·제조 전무 → 시작 재고 0으로 봐서 재고·가용·주간필요 표시
   const days = ['월', '화'];
-  const merged = [{ name: '파랑', days: { 월: {}, 화: {} } }]; // 수동·재고 없음
+  const merged = [{ name: '파랑', days: { 월: {}, 화: {} } }];
   const demand = new Map([['파랑', new Map([['월', 2], ['차주월', 1]])]]);
   const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
   const mon = res.get('파랑').get('월');
-  assert.equal(mon.stock, null);
-  assert.equal(mon.availableDays, null);
-  assert.equal(mon.weeklyNeed, null);                  // totalRequired>0여도 stock null이면 null
-  assert.equal(res.get('파랑').get('화').stock, null);  // carry null 전파
+  assert.equal(mon.stock, 0);           // 재고조사 없는 소요잉크 → 0 기준
+  assert.equal(mon.availableDays, 0);   // 0/2
+  assert.equal(mon.weeklyNeed, -3);     // 0 - (2+1) → 이번 주 3 부족
+  assert.equal(res.get('파랑').get('화').stock, -2); // 0 - 2 carry(부족 노출)
+});
+
+test('computeInkMetrics: 안 쓰는(소요·제조 없는) 잉크엔 0을 넣지 않음 — null 유지', () => {
+  const days = ['월', '화'];
+  const merged = [{ name: '남색', days: { 월: {}, 화: {} } }]; // 소요·제조 없음(inactive)
+  const res = DataService.computeInkMetrics(merged, new Map(), new Map(), days);
+  assert.equal(res.get('남색').get('월').stock, null);  // 안 쓰는 잉크는 blank 유지
+  assert.equal(res.get('남색').get('화').stock, null);
+});
+
+test('computeInkMetrics: 재고조사 있는 잉크는 0으로 안 채움(조사값이 기준)', () => {
+  // 소요 있고 화에만 재고조사 → 월은 종전대로 blank(null), 조사값 우선
+  const days = ['월', '화'];
+  const merged = [{ name: '보라', days: { 월: {}, 화: {} } }];
+  const demand = new Map([['보라', new Map([['월', 1], ['화', 1]])]]);
+  const inv = new Map([['보라', new Map([['화', 9]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, inv, days);
+  assert.equal(res.get('보라').get('월').stock, null); // 재고조사 있는 잉크는 0 안 넣음
+  assert.equal(res.get('보라').get('화').stock, 9);    // 조사값
 });
 
 test('computeInkMetrics: 시작 재고 없어도 제조량 넣으면 0 기준으로 다음날 carry', () => {
-  // 재고조사·수동 현재고 모두 없는 잉크. 월에 제조 100 → 화 재고/가용이 떠야 함(예전엔 null로 버려짐)
+  // 재고조사 없는 소요잉크. 월에 제조 100 → 월 재고 0(0기준)·화 재고 96·가용 48
   const days = ['월', '화'];
   const merged = [{ name: '초록', days: { 월: { 제조량: '100' }, 화: {} } }];
   const demand = new Map([['초록', new Map([['월', 4], ['화', 2]])]]);
   const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
   const mon = res.get('초록').get('월');
-  assert.equal(mon.stock, null);        // 시작 재고는 여전히 모름(표시 blank)
+  assert.equal(mon.stock, 0);           // 재고조사 없는 소요잉크 → 0 기준
   assert.equal(mon.manufacture, 100);
   const tue = res.get('초록').get('화');
   assert.equal(tue.stock, 96);          // 0 + 100 - 4 = 96 이월
   assert.equal(tue.availableDays, 48);  // round1(96/2)
-});
-
-test('computeInkMetrics: 시작 재고 없고 제조도 없으면 종전대로 null 전파(과잉 0 방지)', () => {
-  const days = ['월', '화'];
-  const merged = [{ name: '남색', days: { 월: {}, 화: {} } }];
-  const demand = new Map([['남색', new Map([['월', 2], ['화', 1]])]]);
-  const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
-  assert.equal(res.get('남색').get('화').stock, null); // 제조 없으면 0 지어내지 않음
 });
 
 test('computeInkMetrics: required=0이면 availableDays=null (0 나눗셈 회피)', () => {

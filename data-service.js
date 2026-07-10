@@ -1210,7 +1210,13 @@
       const byDay = new Map();
       const demand = demandByInkDay.get(ink.name) || new Map();
       const totalRequired = [...days, '차주월'].reduce((sum, d) => sum + (demand.get(d) || 0), 0);
-      let carry = null;
+      // "포함" 잉크 = 사출계획에 쓰이거나(소요>0) 제조량을 입력한 잉크.
+      // 이 중 재고조사가 아예 없는 잉크는 시작 재고를 0으로 봐서 재고·가용을 채운다
+      // (재고조사 있는 잉크는 그 값이 기준이라 손대지 않음 / 안 쓰는 잉크엔 0을 넣지 않음).
+      const hasInv = inventoryByInkDay.has(ink.name);
+      const anyManufacture = days.some(d => toNum(ink.days?.[d]?.['제조량']) !== null);
+      const active = totalRequired > 0 || anyManufacture;
+      let carry = (active && !hasInv) ? 0 : null;
 
       for (const d of days) {
         const dd = ink.days?.[d] || {};
