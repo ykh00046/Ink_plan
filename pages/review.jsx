@@ -635,6 +635,7 @@ function ReviewPage({ ctx }) {
 
 function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange, onAcceptBrandSuggestion, onFixMaster, onMachineChange, onProductChange, onPick }) {
   const renderStatus = () => {
+    if (row.isStop) return <Pill tone="warn">정지</Pill>;
     if (row.isTest) return <Pill tone="default">TEST</Pill>;
     if (decision?.action === 'auto') return <Pill tone="ok">자동 일치</Pill>;
     if (decision?.action === 'match') return <Pill tone="ok">✓ 선택됨</Pill>;
@@ -684,7 +685,7 @@ function ReviewRow({ row, decision, onNew, onUndo, allBrands = [], onBrandChange
       </td>
       <td>{renderStatus()}</td>
       <td>
-        {row.isTest && <span style={{ color: 'var(--ink-500)', fontSize: 11 }}>TEST 행 — 등록 불필요</span>}
+        {row.isTest && <span style={{ color: 'var(--ink-500)', fontSize: 11 }}>{row.isStop ? '정지된 호기 — 등록 불필요' : 'TEST 행 — 등록 불필요'}</span>}
         {!row.isTest && decision && decision.action !== 'auto' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--ink-700)' }}>

@@ -1268,6 +1268,10 @@
 
   // ── review / OCR 매칭 (pages/review.jsx 에서 이전) ──────────────────────────
 
+  // 설비(호기) 정지 표기 집합 — normalizeProductName(대문자화 + 구분자 제거) 적용 후 값 기준.
+  // 현장 표기가 늘면 여기만 추가하면 됨. (예: "stop"/"STOP"→'STOP', "호기 정지"→'호기정지')
+  const STOP_TOKENS = new Set(['STOP', '정지', '호기정지', '설비정지', '멈춤', '중단', 'SHUTDOWN']);
+
   // OCR 한 행을 마스터와 매칭 — { status, matchedName?, candidates?, suggestedBrand? }
   function matchOcrRow(r, masterIndex) {
     // TEST 행 판정 — 미등록 목록에서 제외(등록 불필요, 단 사출계획에는 그대로 반영):
@@ -1276,12 +1280,17 @@
     //  · 구분(brand)란이 TEST — 테스트 런은 제품명이 있어도 구분란에 TEST로 표기됨
     const nameNorm = normalizeProductName(r.product_name);
     const brandNorm = normalizeProductName(r.brand);
+    // 설비(호기) 정지 표기 — 제품이 아니므로 TEST와 동일하게 매칭 스킵(미등록 목록서 제외).
+    // 정확히 일치하는 것만 스킵(오탐 방지). 라벨만 '정지'로 구분(isStop).
+    if (STOP_TOKENS.has(nameNorm) || STOP_TOKENS.has(brandNorm)) {
+      return { isTest: true, isStop: true, status: 'skip', matchedName: null, confidence: 0, candidates: [] };
+    }
     const isTest = !String(r.product_name || '').trim()
       || nameNorm === 'TEST'
       || nameNorm === '테스트'
       || brandNorm === 'TEST';
     if (isTest) {
-      return { isTest: true, status: 'skip', matchedName: null, confidence: 0, candidates: [] };
+      return { isTest: true, isStop: false, status: 'skip', matchedName: null, confidence: 0, candidates: [] };
     }
 
     const normName = normalizeProductName(r.product_name);
