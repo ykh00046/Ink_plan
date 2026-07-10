@@ -1223,7 +1223,10 @@
         const manufacture = toNum(dd['제조량']) || 0;
         const availableDays = stock !== null && required > 0 ? round1(stock / required) : null;
         const weeklyNeed = d === '월' && stock !== null && totalRequired > 0 ? stock - totalRequired : null;
-        const endStock = stock !== null ? stock + manufacture - required : null;
+        // 시작 재고를 모를 때(재고조사·수동 미입력)도 제조를 넣으면 0 기준으로 쌓아 다음날로 이월.
+        // 안 그러면 재고 없는 잉크는 제조량을 넣어도 endStock=null 이 되어 재고·가용이 영영 안 뜬다.
+        const endStock = stock !== null ? stock + manufacture - required
+          : (manufacture ? manufacture - required : null);
 
         byDay.set(d, {
           stock,
