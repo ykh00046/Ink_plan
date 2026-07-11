@@ -472,7 +472,16 @@ function InkPlanPage({ ctx }) {
             setSortDir={setSortDir}
           />
 
-          <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 300px)' }}>
+          <div className="legend-row no-print">
+            <span className="legend-row__title">색상 안내</span>
+            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'oklch(0.95 0.04 200)', border: '1px solid oklch(0.78 0.08 200)' }} /> 재고 조사에서 자동 입력</span>
+            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'var(--brand-50)', border: '1px solid var(--brand-500)' }} /> 오늘 열</span>
+            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'var(--brand-50)', border: '1px solid var(--brand-400)' }} /> 제조량 입력됨</span>
+            <span className="legend-row__item"><span className="legend-row__dot" style={{ background: 'var(--bad-500)' }} /> <strong style={{ color: 'var(--bad-600)', fontWeight: 600 }}>긴급</strong> — 가용 1일 이하·부족</span>
+            <span className="legend-row__item"><span className="legend-row__dot" style={{ background: 'var(--warn-500)' }} /> <strong style={{ color: 'var(--warn-600)', fontWeight: 600 }}>주의</strong> — 가용 3일 이하</span>
+          </div>
+
+          <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 340px)' }}>
             <table className="tbl inkplan-tbl">
               <thead>
                 <tr>
