@@ -2048,22 +2048,25 @@ button { background: none; border: none; cursor: pointer; }
   flex-direction: column;
   gap: 6px;
   text-align: left;
-  padding: 18px 20px;
+  padding: 15px 17px;
   border: 1px solid var(--ink-200, #e5e7eb);
-  border-radius: 12px;
-  background: #fff;
+  border-radius: 8px;
+  background: var(--paper, #fff);
   cursor: pointer;
   font: inherit;
+  /* 상단 색 액센트 바(디자인 개선안) — 기본은 브랜드, tone별로 색 교체 */
+  box-shadow: inset 0 3px 0 var(--brand-500), var(--shadow-sm);
   transition: box-shadow .15s, transform .15s, border-color .15s;
 }
+.dash-card:hover { border-color: var(--brand-400); transform: translateY(-1px); }
 .dash-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.08); transform: translateY(-1px); }
 .dash-card:focus-visible { outline: 2px solid var(--ink-500, #6366f1); outline-offset: 2px; }
 .dash-card__title { font-size: .85rem; color: var(--ink-500, #6b7280); font-weight: 600; }
 .dash-card__value { font-size: 1.5rem; font-weight: 700; color: var(--ink-800, #1f2937); }
 .dash-card__sub { font-size: .8rem; color: var(--ink-400, #9ca3af); line-height: 1.4; }
-.dash-card--bad  { border-color: var(--bad-600, #dc2626);  background: var(--bad-50, #fef2f2); }
+.dash-card--bad  { box-shadow: inset 0 3px 0 var(--bad-500), var(--shadow-sm); }
 .dash-card--bad  .dash-card__value { color: var(--bad-600, #dc2626); }
-.dash-card--warn { border-color: var(--warn-600, #d97706); background: var(--warn-50, #fffbeb); }
+.dash-card--warn { box-shadow: inset 0 3px 0 var(--warn-500), var(--shadow-sm); }
 .dash-card--warn .dash-card__value { color: var(--warn-600, #d97706); }
 
 /* ── 변경 이력(audit-trail) 타임라인 ───────────────────────────────────────── */
