@@ -158,6 +158,12 @@ function MachinesPage({ ctx }) {
             <div className="page__meta-chips">
               <span className="page__meta-chip">전체 <strong>{(data.machineAssignments || []).length}</strong>개 잉크</span>
               <span className="page__meta-chip">호기 <strong>{machineList.length}</strong>대</span>
+              {(() => {
+                const noCode = (data.machineAssignments || []).filter(a => !a.code).length;
+                return noCode > 0 ? (
+                  <span className="page__meta-chip page__meta-chip--warn" title="품목코드가 비어있는 잉크 — 약품요청서 집계에서 제외됩니다">코드 미입력 <strong>{noCode}</strong></span>
+                ) : null;
+              })()}
             </div>
           </div>
           <div className="page__actions">
@@ -274,9 +280,9 @@ function MachinesPage({ ctx }) {
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn--sm btn--ghost" onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}><Icon name="edit" size={11} /></button>
-                          <button className="btn btn--sm btn--ghost btn--danger" onClick={() => handleDelete(a)}><Icon name="trash" size={11} /></button>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button className="row-act" onClick={() => { setEditingIdx(a); setEditValue(a.machine || ''); }}>수정</button>
+                          <button className="row-act row-act--danger" style={{ marginLeft: 4 }} onClick={() => handleDelete(a)}>삭제</button>
                         </td>
                       </tr>
                     );
@@ -300,6 +306,9 @@ function MachinesPage({ ctx }) {
               </table>
               <datalist id="machine-list">{machineList.map(m => <option key={m} value={m} />)}</datalist>
             </div>
+            <div className="tbl-footnote">
+              <span>호기 태그를 클릭하면 바로 변경 · 신규 등록 시 잉크 생산계획에도 자동 추가</span>
+            </div>
           </Card>
 
           <Card title="호기별 잉크 분포">
@@ -311,7 +320,7 @@ function MachinesPage({ ctx }) {
                   <div key={machine} style={{ padding: '8px 10px', border: '1px solid var(--ink-200)', borderRadius: 'var(--radius-sm)', background: 'var(--ink-50)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <strong style={{ fontSize: 12, color: 'var(--brand-700)' }}>{machine || '미지정'}</strong>
-                      <span className="tag">{inks.length}종</span>
+                      <span className="badge-count">{inks.length}종</span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.5, wordBreak: 'break-word' }}>
                       {inks.slice(0, 8).join(' · ')}
