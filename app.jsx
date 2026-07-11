@@ -62,17 +62,19 @@ const NAV = [
     { id: 'review',     step: '3', label: '미등록 제품 확인', icon: 'sparkle' },
     { id: 'injection',  step: '4', label: '사출계획',        icon: 'injection' },
     { id: 'ink-plan',   step: '5', label: '잉크 생산계획',   icon: 'ink' },
-    { id: 'history',    label: '기록 조회', icon: 'history' },
-    { id: 'audit',      label: '변경 이력', icon: 'history' },
+    { id: 'ink-add',    step: '6', label: '넣어줄 잉크',     icon: 'add', desc: '오늘·내일 공급 (자동 누적)' },
   ]},
   { group: '현장 공급', items: [
-    { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add',    desc: '오늘·내일 공급 (자동 누적)' },
-    { id: 'test-inks', label: '양산대응',     icon: 'beaker' },
+    { id: 'test-inks', label: '양산대응', icon: 'beaker' },
   ]},
   { group: '마스터', items: [
     { id: 'machines', label: '잉크 추가 및 관리', icon: 'beaker' },
     { id: 'products', label: '제품 추가 및 관리', icon: 'plus' },
     { id: 'data-quality', label: '데이터 점검', icon: 'sparkle' },
+  ]},
+  { group: '기록', items: [
+    { id: 'history', label: '기록 조회', icon: 'history' },
+    { id: 'audit',   label: '변경 이력', icon: 'history' },
   ]},
 ];
 
@@ -101,6 +103,15 @@ function App() {
   const [tweaks, setTweaks] = useTweaks(TWEAK_DEFAULTS);
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  // 사이드바 접기/펼치기 (localStorage 유지)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('inkplan.sidebarCollapsed') === '1'; } catch { return false; }
+  });
+  const toggleSidebar = () => setSidebarCollapsed(v => {
+    const next = !v;
+    try { localStorage.setItem('inkplan.sidebarCollapsed', next ? '1' : '0'); } catch {}
+    return next;
+  });
   const [apiKey, setApiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('gemini-3.1-flash-lite');
   const [ocrResult, setOcrResult] = useState(null); // { parsed, sourceImageUrl(data URL), sourceFileName, parsedAt, model } - 검수 페이지로 전달
@@ -443,7 +454,15 @@ function App() {
         </div>
       </header>
 
-      <aside className="app__sidebar">
+      <aside className={`app__sidebar ${sidebarCollapsed ? 'app__sidebar--collapsed' : ''}`}>
+        <button
+          className="sb-toggle"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+          aria-label={sidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+        >
+          <Icon name="chevron" />
+        </button>
         {NAV.map(group => (
           <React.Fragment key={group.group}>
             <div className="sb-section">{group.group}</div>
@@ -452,13 +471,14 @@ function App() {
                 key={item.id}
                 className={`sb-item ${view === item.id ? 'active' : ''}`}
                 onClick={() => setView(item.id)}
+                title={sidebarCollapsed ? item.label : undefined}
               >
                 {item.step
                   ? <span className="sb-item__step">{item.step}</span>
                   : <span className="sb-item__icon"><Icon name={item.icon} /></span>}
                 {item.desc
                   ? <span className="sb-item__text"><span>{item.label}</span><span className="sb-item__desc">{item.desc}</span></span>
-                  : <span>{item.label}</span>}
+                  : <span className="sb-item__label">{item.label}</span>}
                 {item.id === 'products' && <span className="sb-item__badge">{data.products?.length || 0}</span>}
                 {item.id === 'test-inks' && <span className="sb-item__badge" style={{background:'oklch(0.95 0.05 30)',color:'oklch(0.50 0.16 30)'}}>{data.testInks?.length || 0}</span>}
                 {item.id === 'data-quality' && masterHealth.show && (

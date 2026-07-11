@@ -205,7 +205,42 @@ button { background: none; border: none; cursor: pointer; }
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
 }
+
+/* 사이드바 접기/펼치기 토글 */
+.sb-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid var(--ink-100);
+  background: none;
+  cursor: pointer;
+  color: var(--ink-500);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.sb-toggle:hover { background: var(--ink-100); color: var(--ink-700); }
+.sb-toggle svg { width: 16px; height: 16px; transition: transform 0.2s; }
+/* 펼침: chevron 왼쪽(접기 방향) / 접힘: 오른쪽(펼치기 방향) */
+.app__sidebar:not(.app__sidebar--collapsed) .sb-toggle svg { transform: rotate(90deg); }
+.app__sidebar--collapsed .sb-toggle { justify-content: center; }
+.app__sidebar--collapsed .sb-toggle svg { transform: rotate(-90deg); }
+
+/* 접힌 상태 — 아이콘만, 폭 축소 (:has로 상위 그리드 열 폭 조정) */
+.app:has(.app__sidebar--collapsed) { grid-template-columns: 56px 1fr; }
+.app__sidebar--collapsed .sb-section { height: 0; padding: 6px 0 0; overflow: hidden; }
+.app__sidebar--collapsed .sb-item {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}
+.app__sidebar--collapsed .sb-item__label,
+.app__sidebar--collapsed .sb-item__text,
+.app__sidebar--collapsed .sb-item__badge,
+.app__sidebar--collapsed .sb-footer { display: none; }
 .sb-section {
   padding: 14px 12px 4px;
   font-size: 10px;
