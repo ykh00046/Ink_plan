@@ -2,7 +2,7 @@
 
 function InjectionPage({ ctx }) {
   const { data, setData, notify, today, dates, lastMergeInfo } = ctx;
-  const [floor, setFloor] = useState('3층');
+  const [floor, setFloor] = useState('all'); // 기본 전체(3층+1층) — 층 구분 배지로 표시
   const [search, setSearch] = useState('');
   const [dayFilter, setDayFilter] = useState('3days'); // 7days | 3days
   const [editing, setEditing] = useState(null); // {floor, mi, day, shift}
@@ -298,7 +298,7 @@ function InjectionPage({ ctx }) {
                   const realMi = machines.indexOf(m);
                   return (
                     <tr key={m.machine}>
-                      <td className="sticky-col injection-machine-cell">
+                      <td className={`sticky-col injection-machine-cell ${floor === 'all' ? `injection-machine-cell--${m._floor === '3층' ? 'f3' : 'f1'}` : ''}`}>
                         <div className="injection-machine-name">
                           {floor === 'all' && (
                             <span className={`injection-floor-badge injection-floor-badge--${m._floor === '3층' ? 'f3' : 'f1'}`}>

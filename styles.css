@@ -815,8 +815,12 @@ button { background: none; border: none; cursor: pointer; }
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
-.injection-floor-badge--f3 { background: var(--brand-100, var(--brand-50)); color: var(--brand-700); }
-.injection-floor-badge--f1 { background: var(--info-100); color: var(--info-600); }
+/* 층별로 뚜렷이 다른 색상(3층=보라 / 1층=청록)으로 시인성 강화 */
+.injection-floor-badge--f3 { background: oklch(0.94 0.05 280); color: oklch(0.45 0.13 280); }
+.injection-floor-badge--f1 { background: oklch(0.94 0.045 200); color: oklch(0.42 0.10 200); }
+/* 전체 보기에서 행 좌측 색 보더로 층 그룹 구분 */
+.injection-machine-cell--f3 { box-shadow: inset 3px 0 0 oklch(0.55 0.13 280); }
+.injection-machine-cell--f1 { box-shadow: inset 3px 0 0 oklch(0.52 0.11 200); }
 
 .tbl th.injection-day-head {
   min-width: 148px;
