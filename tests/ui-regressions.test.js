@@ -174,12 +174,13 @@ test('depletion alert is wired to global navigation and dashboard', () => {
   assert.match(dashboard, /availableDays/);
 });
 
-test('dashboard nudges to close the week when this week is not archived', () => {
+test('weekly close is automatic on app load (manual nudge removed)', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
+  assert.match(app, /\/api\/snapshot\b/);               // 자동 스냅샷 POST
+  assert.match(app, /autoCloseRef/);                    // 로드 시 1회 가드
+  assert.match(app, /buildWeeklyInkSummary/);           // 주간 요약 함께 저장
   const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
-  assert.match(dashboard, /\/api\/snapshots/);          // 마감 여부 조회
-  assert.match(dashboard, /isWeekArchived/);            // 판정
-  assert.match(dashboard, /weekClosed/);                // 미마감 시에만 넛지
-  assert.match(dashboard, /setView\('history'\)/);      // 마감하러 이동
+  assert.doesNotMatch(dashboard, /마감하러 가기/);       // 자동화로 유도 배너 제거
 });
 
 test('relabel belongs only to its original lot row', () => {
