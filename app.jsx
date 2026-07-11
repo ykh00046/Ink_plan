@@ -67,7 +67,6 @@ const NAV = [
   ]},
   { group: '현장 공급', items: [
     { id: 'ink-add',   label: '넣어줄 잉크', icon: 'add',    desc: '오늘·내일 공급 (자동 누적)' },
-    { id: 'chemicals', label: '약품요청서',   icon: 'beaker', desc: '기간별 발주 집계 (코드)' },
     { id: 'test-inks', label: '양산대응',     icon: 'beaker' },
   ]},
   { group: '마스터', items: [
@@ -492,7 +491,6 @@ function App() {
         {view === 'history' && <HistoryPage ctx={ctx} />}
         {view === 'audit' && <AuditPage ctx={ctx} />}
         {view === 'ink-add' && <InkAddPage ctx={ctx} />}
-        {view === 'chemicals' && <ChemicalsPage ctx={ctx} />}
         {view === 'products' && <ProductsPage ctx={ctx} />}
         {view === 'machines' && <MachinesPage ctx={ctx} />}
         {view === 'test-inks' && <TestInksPage ctx={ctx} />}
