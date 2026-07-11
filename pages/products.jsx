@@ -221,25 +221,21 @@ function ProductsPage({ ctx }) {
                 </tr>
                 {filtered.map((p) => (
                   <tr key={p.id || p.name}>
-                    <td>{p.factory ? <span className="tag">{p.factory}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
-                    <td className="sticky-col" style={{ fontWeight: 500 }}>{p.name}</td>
-                    <td>{p.type ? <span className="tag">{p.type}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
-                    <td>{p.brand ? <span className="tag">{p.brand}</span> : <span style={{ color: 'var(--ink-400)' }}>·</span>}</td>
+                    <td>{p.factory ? <span className="badge-cell">{p.factory}</span> : <span className="cell-muted">·</span>}</td>
+                    <td className="sticky-col" style={{ fontWeight: 600 }}>{p.name}</td>
+                    <td>{p.type ? <span className={`badge-cell ${p.type === 'LIQUID' ? 'badge-type--liquid' : 'badge-type--powder'}`}>{p.type}</span> : <span className="cell-muted">·</span>}</td>
+                    <td style={{ color: 'var(--ink-700)' }}>{p.brand || <span className="cell-muted">·</span>}</td>
                     {[0, 1, 2].map(idx => {
                       const ink = (p.inks || [])[idx];
                       return (
                         <td key={idx} style={{ textAlign: 'center' }}>
-                          {ink ? (
-                            <span className="tag" style={{ color: 'var(--brand-700)', background: 'var(--brand-50)', borderColor: 'var(--brand-200)' }}>{ink}</span>
-                          ) : (
-                            <span style={{ color: 'var(--ink-300)', fontSize: 11 }}>·</span>
-                          )}
+                          {ink ? <span className="badge-ink">{ink}</span> : <span className="cell-muted">·</span>}
                         </td>
                       );
                     })}
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn--sm btn--ghost" onClick={() => setEditing({ mode: 'edit', product: p })}><Icon name="edit" size={11} /></button>
-                      <button className="btn btn--sm btn--ghost btn--danger" onClick={() => setConfirmDelete(p)}><Icon name="trash" size={11} /></button>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="row-act" onClick={() => setEditing({ mode: 'edit', product: p })}>수정</button>
+                      <button className="row-act row-act--danger" style={{ marginLeft: 4 }} onClick={() => setConfirmDelete(p)}>삭제</button>
                     </td>
                   </tr>
                 ))}
@@ -255,6 +251,9 @@ function ProductsPage({ ctx }) {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="tbl-footnote">
+            <span>잉크는 마스터에 등록된 이름만 사용 가능 · 사출계획에서 쓰는 제품은 삭제되지 않습니다</span>
           </div>
         </Card>
 
