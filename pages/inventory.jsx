@@ -834,6 +834,7 @@ function InventoryPage({ ctx }) {
                 <span className="page__meta-chip">행 <strong>{visibleLots.length}</strong></span>
                 <span className="page__meta-chip">Lot <strong>{visibleLots.length}</strong></span>
                 <span className="page__meta-chip">오늘 입력 <strong>{currentCount}</strong></span>
+                <span className="page__meta-chip" style={{ background: 'var(--info-100)', color: 'var(--info-600)' }} title="여기서 입력한 오늘 재고가 잉크 생산계획의 '재고' 셀에 자동 반영됩니다">생산계획에 자동 반영</span>
               </div>
             ) : (
               <div className="page__meta">오늘 일자가 자동 생성됩니다. 필요하면 우측 [이어서 생성] 버튼으로 다시 확인하세요.</div>
@@ -979,6 +980,11 @@ function InventoryPage({ ctx }) {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="tbl-footnote no-print">
+            <span>행 <strong style={{ color: 'var(--ink-900)' }}>{visibleLots.length}</strong> · 오늘 입력 <strong style={{ color: 'var(--ink-900)' }}>{currentCount}</strong></span>
+            <div style={{ flex: 1 }} />
+            <span>오늘 열에서 Enter → 아래 칸 이동 · 자동 저장</span>
           </div>
         </Card>
       </div>
