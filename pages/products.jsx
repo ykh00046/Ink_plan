@@ -6,7 +6,9 @@ function ProductsPage({ ctx }) {
   const [brandFilter, setBrandFilter] = useState('all');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editing, setEditing] = useState(null);
-  const [quickAdd, setQuickAdd] = useState({ factory: '', name: '', type: '', brand: '', inks: [null, null, null] });
+  // 공장은 C관 전용 — 선택 없이 자동 지정
+  const DEFAULT_FACTORY = 'C관';
+  const [quickAdd, setQuickAdd] = useState({ factory: DEFAULT_FACTORY, name: '', type: '', brand: '', inks: [null, null, null] });
 
   const brands = useMemo(() => ['all', ...DataService.buildBrandOptions(data.products)], [data.products]);
 
@@ -60,8 +62,8 @@ function ProductsPage({ ctx }) {
   // padInks3는 ui.jsx의 헬퍼 사용
   const handleQuickAdd = () => {
     const filledInks = quickAdd.inks.filter(Boolean);
-    if (!quickAdd.factory.trim() || !quickAdd.name.trim() || !quickAdd.type.trim() || !quickAdd.brand.trim() || filledInks.length === 0) {
-      notify('공장, 제품명, TYPE, 고객사, 잉크를 모두 입력해야 추가할 수 있습니다');
+    if (!quickAdd.name.trim() || !quickAdd.type.trim() || !quickAdd.brand.trim() || filledInks.length === 0) {
+      notify('제품명, TYPE, 고객사, 잉크를 모두 입력해야 추가할 수 있습니다');
       return;
     }
     const unknown = findUnknownInks(quickAdd.inks);
@@ -71,7 +73,7 @@ function ProductsPage({ ctx }) {
     }
     const newProduct = {
       id: DataService.allocateProductId(data.products),
-      factory: quickAdd.factory.trim(),
+      factory: DEFAULT_FACTORY,
       name: quickAdd.name.trim(),
       type: quickAdd.type.trim(),
       brand: quickAdd.brand.trim(),
@@ -80,13 +82,13 @@ function ProductsPage({ ctx }) {
     };
     setData({ ...data, products: [newProduct, ...data.products] });
     notify(`'${newProduct.name}' 제품 추가됨`);
-    setQuickAdd({ factory: '', name: '', type: '', brand: '', inks: [null, null, null] });
+    setQuickAdd({ factory: DEFAULT_FACTORY, name: '', type: '', brand: '', inks: [null, null, null] });
   };
 
   const handleSave = (product) => {
     const filledInks = (product.inks || []).filter(Boolean);
-    if (!product.factory?.trim() || !product.name?.trim() || !product.type?.trim() || !product.brand?.trim() || filledInks.length === 0) {
-      notify('공장, 제품명, TYPE, 고객사, 잉크를 모두 입력해야 저장할 수 있습니다');
+    if (!product.name?.trim() || !product.type?.trim() || !product.brand?.trim() || filledInks.length === 0) {
+      notify('제품명, TYPE, 고객사, 잉크를 모두 입력해야 저장할 수 있습니다');
       return;
     }
     const unknown = findUnknownInks(filledInks);
@@ -167,7 +169,6 @@ function ProductsPage({ ctx }) {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 70 }}>공장</th>
                   <th className="sticky-col" style={{ width: 220 }}>제품명</th>
                   <th style={{ width: 90 }}>TYPE</th>
                   <th style={{ width: 110 }}>고객사</th>
@@ -180,12 +181,6 @@ function ProductsPage({ ctx }) {
               <tbody>
                   {/* Quick add row */}
                   <tr style={{ background: 'var(--brand-50)' }}>
-                  <td>
-                    <select className="input select" value={quickAdd.factory} onChange={e => setQuickAdd({ ...quickAdd, factory: e.target.value })} style={{ width: '100%' }}>
-                      <option value="">공장 선택</option>
-                      {factoryOptions.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </td>
                   <td className="sticky-col" style={{ background: 'var(--brand-50)' }}>
                     <input className="input" placeholder="신규 제품명*" value={quickAdd.name} onChange={e => setQuickAdd({ ...quickAdd, name: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }} style={{ width: '100%' }} />
                   </td>
@@ -221,7 +216,6 @@ function ProductsPage({ ctx }) {
                 </tr>
                 {filtered.map((p) => (
                   <tr key={p.id || p.name}>
-                    <td>{p.factory ? <span className="badge-cell">{p.factory}</span> : <span className="cell-muted">·</span>}</td>
                     <td className="sticky-col" style={{ fontWeight: 600 }}>{p.name}</td>
                     <td>{p.type ? <span className={`badge-cell ${p.type === 'LIQUID' ? 'badge-type--liquid' : 'badge-type--powder'}`}>{p.type}</span> : <span className="cell-muted">·</span>}</td>
                     <td style={{ color: 'var(--ink-700)' }}>{p.brand || <span className="cell-muted">·</span>}</td>
@@ -240,7 +234,7 @@ function ProductsPage({ ctx }) {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan="8">
+                  <tr><td colSpan="7">
                     <div className="empty-state">
                       <div className="empty-state__title">
                         {search || brandFilter !== 'all' ? '조건에 맞는 제품 없음' : '등록된 제품 없음'}
@@ -287,7 +281,7 @@ function ProductsPage({ ctx }) {
 
 function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factoryOptions, typeOptions }) {
   const [form, setForm] = useState({
-    factory: product.factory || '',
+    factory: product.factory || 'C관', // 공장은 C관 전용 — 선택 없이 자동 지정
     name: product.name || '',
     type: product.type || '',
     brand: product.brand || product.customer || '',
@@ -301,7 +295,7 @@ function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factor
   };
 
   const filledCount = form.inks.filter(Boolean).length;
-  const canSave = form.factory.trim() && form.name.trim() && form.type.trim() && form.brand.trim() && filledCount > 0;
+  const canSave = form.name.trim() && form.type.trim() && form.brand.trim() && filledCount > 0;
 
   return (
     <Modal
@@ -316,18 +310,9 @@ function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factor
         </>
       }
     >
-      <div className="row-2">
-        <div className="field">
-          <label className="field__label">공장</label>
-          <select className="input select" value={form.factory} onChange={e => setForm({ ...form, factory: e.target.value })}>
-            <option value="">공장 선택</option>
-            {factoryOptions.map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label className="field__label">제품명<span className="req">*</span></label>
-          <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="예: RHAPSODY" autoFocus />
-        </div>
+      <div className="field">
+        <label className="field__label">제품명<span className="req">*</span></label>
+        <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="예: RHAPSODY" autoFocus />
       </div>
       <div className="row-2">
         <div className="field">
