@@ -229,18 +229,26 @@ button { background: none; border: none; cursor: pointer; }
 .app__sidebar--collapsed .sb-toggle { justify-content: center; }
 .app__sidebar--collapsed .sb-toggle svg { transform: rotate(-90deg); }
 
-/* 접힌 상태 — 아이콘만, 폭 축소 (:has로 상위 그리드 열 폭 조정) */
+/* 접힌 상태 — 폭 56px 레일. :has로 상위 그리드 열 폭만 축소(본문은 그대로 유지). */
+.app { position: relative; }
 .app:has(.app__sidebar--collapsed) { grid-template-columns: 56px 1fr; }
-.app__sidebar--collapsed .sb-section { height: 0; padding: 6px 0 0; overflow: hidden; }
-.app__sidebar--collapsed .sb-item {
-  justify-content: center;
-  padding: 9px 0;
-  gap: 0;
+
+/* 마우스를 올리면 240px로 펼쳐 본문 위에 오버레이(본문 리플로우 없음). */
+.app__sidebar--collapsed:hover {
+  position: absolute;
+  top: 48px; left: 0; bottom: 0;
+  width: 240px;
+  z-index: 50;
+  box-shadow: var(--shadow-lg);
 }
-.app__sidebar--collapsed .sb-item__label,
-.app__sidebar--collapsed .sb-item__text,
-.app__sidebar--collapsed .sb-item__badge,
-.app__sidebar--collapsed .sb-footer { display: none; }
+
+/* 접혔고 hover 아닐 때만 아이콘 모드로 축소 */
+.app__sidebar--collapsed:not(:hover) .sb-section { height: 0; padding: 6px 0 0; overflow: hidden; }
+.app__sidebar--collapsed:not(:hover) .sb-item { justify-content: center; padding: 9px 0; gap: 0; }
+.app__sidebar--collapsed:not(:hover) .sb-item__label,
+.app__sidebar--collapsed:not(:hover) .sb-item__text,
+.app__sidebar--collapsed:not(:hover) .sb-item__badge,
+.app__sidebar--collapsed:not(:hover) .sb-footer { display: none; }
 .sb-section {
   padding: 14px 12px 4px;
   font-size: 10px;
