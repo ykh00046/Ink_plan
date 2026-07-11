@@ -149,7 +149,7 @@ function DashboardPage({ ctx }) {
                 <button className="btn" onClick={() => setView('inventory')}><Icon name="search" size={12} /> 재고 조사 입력</button>
                 <button className="btn" onClick={() => setView('ocr-import')}><Icon name="image" size={12} /> INK 요청서 파싱</button>
                 <button className="btn" onClick={() => setView('ink-plan')}><Icon name="ink" size={12} /> 잉크 생산계획</button>
-                <button className="btn" onClick={() => setView('chemicals')}><Icon name="beaker" size={12} /> 약품요청서 집계</button>
+                <button className="btn" onClick={() => setView('ink-add')}><Icon name="add" size={12} /> 넣어줄 잉크</button>
               </div>
             )}
           </div>

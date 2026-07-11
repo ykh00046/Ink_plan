@@ -12,11 +12,7 @@ function ProductsPage({ ctx }) {
 
   const brands = useMemo(() => ['all', ...DataService.buildBrandOptions(data.products)], [data.products]);
 
-  const factoryOptions = useMemo(() => {
-    const s = new Set(['C관', 'S관']);
-    for (const p of data.products) if (p.factory) s.add(p.factory);
-    return Array.from(s).sort();
-  }, [data.products]);
+  // 공장은 C관 전용 — 선택 UI 없음(products.jsx DEFAULT_FACTORY로 자동 지정)
 
   const typeOptions = useMemo(() => {
     const s = new Set(['POWDER', 'LIQUID']);
@@ -259,7 +255,6 @@ function ProductsPage({ ctx }) {
             onClose={() => setEditing(null)}
             brands={brands.filter(b => b !== 'all')}
             allInks={allInks}
-            factoryOptions={factoryOptions}
             typeOptions={typeOptions}
           />
         )}
@@ -279,7 +274,7 @@ function ProductsPage({ ctx }) {
   );
 }
 
-function ProductEditor({ product, mode, onSave, onClose, brands, allInks, factoryOptions, typeOptions }) {
+function ProductEditor({ product, mode, onSave, onClose, brands, allInks, typeOptions }) {
   const [form, setForm] = useState({
     factory: product.factory || 'C관', // 공장은 C관 전용 — 선택 없이 자동 지정
     name: product.name || '',

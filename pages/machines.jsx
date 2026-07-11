@@ -161,7 +161,7 @@ function MachinesPage({ ctx }) {
               {(() => {
                 const noCode = (data.machineAssignments || []).filter(a => !a.code).length;
                 return noCode > 0 ? (
-                  <span className="page__meta-chip page__meta-chip--warn" title="품목코드가 비어있는 잉크 — 약품요청서 집계에서 제외됩니다">코드 미입력 <strong>{noCode}</strong></span>
+                  <span className="page__meta-chip page__meta-chip--warn" title="품목코드가 비어있는 잉크 — 발주·집계에서 제외됩니다">코드 미입력 <strong>{noCode}</strong></span>
                 ) : null;
               })()}
             </div>

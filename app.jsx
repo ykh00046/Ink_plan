@@ -802,11 +802,6 @@ function TweaksControls({ tweaks, setTweak }) {
       <TweakSection title="테이블">
         <TweakToggle label="행 번호 표시" value={tweaks.showRowNum} onChange={v => setTweak('showRowNum', v)} />
       </TweakSection>
-      <TweakSection title="약품요청서">
-        <TweakText label="발주 작성자" value={tweaks.requester || ''}
-          placeholder="예: 김선명 (생산관리팀)"
-          onChange={v => setTweak('requester', v)} />
-      </TweakSection>
     </TweaksPanel>
   );
 }
