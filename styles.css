@@ -200,6 +200,8 @@ button { background: none; border: none; cursor: pointer; }
 
 /* Sidebar */
 .app__sidebar {
+  grid-column: 1;      /* 1번 열 고정 (오버레이 시 flow에서 빠져도 본문 자리 유지) */
+  grid-row: 2;
   background: var(--paper);
   border-right: 1px solid var(--ink-200);
   display: flex;
@@ -332,6 +334,8 @@ button { background: none; border: none; cursor: pointer; }
 
 /* Main area */
 .app__main {
+  grid-column: 2;      /* 2번 열 고정 — 사이드바가 오버레이(absolute)돼도 안 밀림 */
+  grid-row: 2;
   overflow: auto;
   background: var(--ink-100);
   display: flex;
