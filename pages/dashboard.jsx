@@ -16,19 +16,7 @@ function DashboardPage({ ctx }) {
 
   const { master, shortage, depletion, week } = sum;
 
-  // 주간 마감 상태 — 안 하면 History·소비추세가 비니 진입 화면에서 마감을 유도(read-only 넛지).
-  const [snapshots, setSnapshots] = React.useState(null);
-  React.useEffect(() => {
-    let alive = true;
-    fetch('/api/snapshots', { cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : []))
-      .then(list => { if (alive) setSnapshots(list); })
-      .catch(() => { if (alive) setSnapshots([]); });
-    return () => { alive = false; };
-  }, []);
-  const thisWeek = React.useMemo(() => DataService.getWeekInfo().isoLabel, []);
-  const weekClosed = snapshots === null ? true : DataService.isWeekArchived(snapshots, thisWeek);
-
+  // 주간 마감은 앱 열 때 자동 처리(app.jsx) — 별도 유도 배너 불필요.
   const Card = ({ tone, title, value, sub, go }) => (
     <button
       type="button"
@@ -58,23 +46,6 @@ function DashboardPage({ ctx }) {
       <h1 className="page__title">대시보드</h1>
       <p className="page__desc">오늘의 시스템 상태를 한눈에. 카드를 누르면 해당 화면으로 이동합니다.</p>
 
-      {!weekClosed && (
-        <button
-          type="button"
-          onClick={() => setView('history')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-            padding: '10px 14px', marginBottom: 12, cursor: 'pointer',
-            background: 'var(--warn-50)', border: '1px solid var(--warn-300)', borderRadius: 8,
-            color: 'var(--warn-700)', fontSize: 13,
-          }}
-          title="이번 주를 마감하면 나중에 이 주의 계획·재고를 그대로 조회하고, 잉크 소비 추세가 쌓입니다."
-        >
-          <Icon name="save" size={14} />
-          <span><strong>이번 주 {thisWeek}</strong>가 아직 마감되지 않았습니다 — 기록 조회에서 마감하면 소비 추세가 쌓입니다.</span>
-          <span style={{ marginLeft: 'auto', fontWeight: 600 }}>마감하러 가기 ›</span>
-        </button>
-      )}
 
       <div className="dash-grid">
         <Card
