@@ -849,7 +849,7 @@ test('isInkInMaster 가 normalizeInkName 기준으로 일관 매칭', () => {
 });
 
 // ── 재고 부족 예상 전역 알림 (inventory-shortage-alert) ──────────────────────
-const mkCb = (entries) => new Map(entries.map(([name, wn]) => [name, new Map([['월', { weeklyNeed: wn }]])]));
+const mkCb = (entries) => new Map(entries.map(([name, wn]) => [name, new Map([['월', { weeklyNeed: wn, stockReal: true }]])]));
 
 test('collectInkShortage: 부족 없음(weeklyNeed>=0/null만) → show:false', () => {
   const merged = [{ name: 'A' }, { name: 'B' }];
@@ -895,12 +895,34 @@ test('collectInkShortage: 3건 초과 tooltip 상위 3개 + "외" 접미사', ()
   assert.match(r.tooltip, /A · B · C 외$/);
 });
 
+test('collectInkShortage: 재고 미조사(stockReal=false)는 제외 — 0가정 오탐 방지', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }];
+  const cb = new Map([
+    ['A', new Map([['월', { weeklyNeed: -6, stockReal: false }]])], // 미조사(0가정) → 제외
+    ['B', new Map([['월', { weeklyNeed: -2, stockReal: true }]])],  // 실재고 부족 → 포함
+  ]);
+  const r = DataService.collectInkShortage(merged, cb);
+  assert.equal(r.shortageCount, 1);
+  assert.equal(r.items[0].ink, 'B');
+});
+
+test('collectInkDepletionRisks: 재고 미조사(stockReal=false)는 제외', () => {
+  const merged = [{ name: 'A' }, { name: 'B' }];
+  const metrics = new Map([
+    ['A', new Map([['월', { availableDays: 0, stock: 0, required: 2, stockReal: false }]])],
+    ['B', new Map([['월', { availableDays: 1, stock: 2, required: 2, stockReal: true }]])],
+  ]);
+  const r = DataService.collectInkDepletionRisks(merged, metrics, ['월'], '월', 3);
+  assert.equal(r.depletionCount, 1);
+  assert.equal(r.items[0].ink, 'B');
+});
+
 // ── availableDays 기반 잉크 소진 임박 알림 ─────────────────────────────────
 const mkDepletionMetrics = (entries) => new Map(entries.map(([name, values]) => [
   name,
   new Map(Object.entries(values).map(([day, availableDays]) => [
     day,
-    { availableDays, stock: availableDays == null ? null : availableDays * 2, required: 2 },
+    { availableDays, stock: availableDays == null ? null : availableDays * 2, required: 2, stockReal: true },
   ])),
 ]));
 

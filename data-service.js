@@ -484,9 +484,10 @@
   function collectInkShortage(merged, computedByInk) {
     const items = [];
     for (const ink of (merged || [])) {
-      const wn = computedByInk.get(ink.name)?.get('월')?.weeklyNeed;
-      if (wn != null && Number(wn) < 0) {
-        items.push({ ink: ink.name, weeklyNeed: Number(wn) });
+      const m = computedByInk.get(ink.name)?.get('월');
+      // 실재고(재고조사/수동) 있는 잉크만 — 미조사(0가정) 잉크는 부족 알림서 제외(오탐 방지).
+      if (m && m.stockReal && m.weeklyNeed != null && Number(m.weeklyNeed) < 0) {
+        items.push({ ink: ink.name, weeklyNeed: Number(m.weeklyNeed) });
       }
     }
     items.sort((a, b) => a.weeklyNeed - b.weeklyNeed); // 가장 부족한 순
@@ -518,6 +519,8 @@
       for (let i = startIdx; i < orderedDays.length; i++) {
         const day = orderedDays[i];
         const metrics = computedByInk.get(ink.name)?.get(day);
+        // 실재고 있는 잉크만 — 미조사(0가정) 잉크는 소진 알림서 제외(오탐 방지).
+        if (!metrics?.stockReal) continue;
         const availableDays = Number(metrics?.availableDays);
         if (metrics?.availableDays == null || !Number.isFinite(availableDays) || availableDays > limit) continue;
         items.push({
@@ -1217,6 +1220,10 @@
       const anyManufacture = days.some(d => toNum(ink.days?.[d]?.['제조량']) !== null);
       const active = totalRequired > 0 || anyManufacture;
       let carry = (active && !hasInv) ? 0 : null;
+      // 실재고 여부 = 재고조사 or 수동 현재고 입력. 0기준(가정) 재고와 구분해
+      // 부족·소진 "알림"이 미조사 잉크로 오탐하지 않게 한다(표시는 0기준 유지).
+      const hasManual = days.some(d => toNum(ink.days?.[d]?.['현재고']) !== null);
+      const stockReal = hasInv || hasManual;
 
       for (const d of days) {
         const dd = ink.days?.[d] || {};
@@ -1241,6 +1248,7 @@
           availableDays,
           weeklyNeed,
           stockFromInv: invStock !== undefined,
+          stockReal, // 실재고(재고조사/수동) 기반인지 — 알림 오탐 방지용
         });
         carry = endStock;
       }
