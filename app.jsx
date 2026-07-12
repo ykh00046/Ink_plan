@@ -123,19 +123,24 @@ function App() {
   const viewRef = useRef(view);       // 저장 시 X-Edit-Source(감사 로그 출처)로 현재 화면 전달
   viewRef.current = view;
   const autoCloseRef = useRef(false); // 자동 주간 마감(앱 로드 시 1회) 가드
+  const dataRef = useRef(null);       // 최신 data — 비동기 완료 시점의 state 참조용 (F-03; F-02 수정에서도 재사용 예정)
+  dataRef.current = data;
 
   // 자동 주간 마감 — 앱을 열 때 현재 주 스냅샷을 1회 자동 갱신(멱등 덮어쓰기).
   // 데이터가 실제로 로드된 뒤 한 번만. 주가 끝날 때 마지막 저장분이 곧 마감본이 됨.
-  // 초기 렌더가 무거우므로(대용량 data) 렌더 완료 후 배경으로 실행 — 로드 블로킹 방지.
+  // [F-03] cleanup으로 타이머를 취소하지 않는다: [data] 의존 effect에서 cleanup을
+  // 반환하면 4초 내 data 변경이 타이머를 취소하고, autoCloseRef 가드가 재무장을 막아
+  // 그 세션의 자동 마감이 영영 사라진다. 타이머는 1회성 + App은 언마운트되지 않으므로
+  // cleanup 없이 두고, 발사 시점의 최신 state(dataRef)를 스냅샷으로 쓴다.
   useEffect(() => {
     if (autoCloseRef.current || !data) return;
     const hasData = (data.products?.length > 0)
       || Object.values(data.injection || {}).some(list => (list || []).length > 0);
     if (!hasData) return;
     autoCloseRef.current = true;
-    const snap = data; // 로드 시점 데이터 캡처
-    const timer = setTimeout(() => {
+    setTimeout(() => {
       try {
+        const snap = dataRef.current || data;  // 발사 시점의 최신 state
         const label = DataService.getWeekInfo().isoLabel;
         fetch('/api/snapshot', {
           method: 'POST',
@@ -148,7 +153,7 @@ function App() {
         console.warn('[auto-마감] 예외(무시):', e);
       }
     }, 4000);
-    return () => clearTimeout(timer);
+    // cleanup 반환 없음 — 의도적(위 주석 참조)
   }, [data]);
 
   // 초기 로드: 파일 DB API 우선, 실패하면 localStorage → /api/seed fallback

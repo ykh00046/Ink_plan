@@ -177,6 +177,10 @@ test('weekly close is automatic on app load (manual nudge removed)', () => {
   assert.match(app, /\/api\/snapshot\b/);               // 자동 스냅샷 POST
   assert.match(app, /autoCloseRef/);                    // 로드 시 1회 가드
   assert.match(app, /buildWeeklyInkSummary/);           // 주간 요약 함께 저장
+  // [F-03] 자동 마감 블록: 발사 시점 최신 state 사용 + cleanup이 타이머를 취소하지 않음
+  const autoCloseBlock = app.slice(app.indexOf('자동 주간 마감'), app.indexOf('// 초기 로드'));
+  assert.match(autoCloseBlock, /dataRef\.current/);                 // red: 현재 로드 시점 snap 고정
+  assert.doesNotMatch(autoCloseBlock, /return \(\) => clearTimeout/); // red: 현재 cleanup이 취소
   const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
   assert.doesNotMatch(dashboard, /마감하러 가기/);       // 자동화로 유도 배너 제거
 });
