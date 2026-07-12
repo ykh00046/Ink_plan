@@ -36,7 +36,9 @@ function InkAddPage({ ctx }) {
   // 집계 대상 = 오늘 주간 + 오늘 야간 + 내일 주간 (INK 요청서 3칸과 동일 범위)
   const targetCells = useMemo(() => {
     const idx = WEEK.indexOf(today);
-    const nextDay = idx >= 0 && idx < 6 ? WEEK[idx + 1] : null;
+    // 내일 주간 — 일요일(idx=6)이면 다음주 월요일로 순환(injection['월'] 슬롯).
+    // 예전엔 idx<6 조건이라 일요일에 '내일(월)' 계획이 통째로 빠졌다.
+    const nextDay = idx >= 0 ? WEEK[(idx + 1) % WEEK.length] : null;
     return [
       { day: today, shift: 'day' },
       { day: today, shift: 'night' },

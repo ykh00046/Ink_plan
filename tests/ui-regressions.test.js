@@ -163,15 +163,13 @@ test('review page shows source request image for verification', () => {
   assert.match(review, /showImage/);                       // 표시 토글
 });
 
-test('depletion alert is wired to global navigation and dashboard', () => {
+test('risk alerts are shortage-based; depletion removed from dashboard/bell/sidebar', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
   const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
-  assert.match(app, /buildInkPlanningAlerts/);
-  // bell/사이드바는 부족+소진 union 카운트(같은 잉크 이중 카운트 방지)로 배선됨
+  assert.match(app, /buildInkPlanningAlerts/);          // 알림 소스는 유지
   assert.match(app, /riskInkCount/);
-  assert.match(app, /inkDepletion\.items/);
-  assert.match(dashboard, /title="잉크 소진 임박"/);
-  assert.match(dashboard, /availableDays/);
+  assert.doesNotMatch(app, /inkDepletion/);             // 벨/사이드바 배선서 소진 제거
+  assert.doesNotMatch(dashboard, /잉크 소진 임박/);      // 대시보드 소진 카드 제거
 });
 
 test('weekly close is automatic on app load (manual nudge removed)', () => {

@@ -14,7 +14,7 @@ function DashboardPage({ ctx }) {
     [data, dates, today]
   );
 
-  const { master, shortage, depletion, week } = sum;
+  const { master, shortage, week } = sum;
 
   // 주간 마감은 앱 열 때 자동 처리(app.jsx) — 별도 유도 배너 불필요.
   const Card = ({ tone, title, value, sub, go }) => (
@@ -30,7 +30,6 @@ function DashboardPage({ ctx }) {
   );
 
   const shortNames = shortage.items.map(i => i.ink).join(' · ');
-  const depletionNames = depletion.items.map(i => i.ink).join(' · ');
   const weekValue = week.today
     ? `오늘 ${week.today}요일${week.todayDate ? ` (${week.todayDate})` : ''}`
     : '이번 주';
@@ -45,7 +44,6 @@ function DashboardPage({ ctx }) {
     <div className="page dash">
       <h1 className="page__title">대시보드</h1>
       <p className="page__desc">오늘의 시스템 상태를 한눈에. 카드를 누르면 해당 화면으로 이동합니다.</p>
-
 
       <div className="dash-grid">
         <Card
@@ -68,13 +66,6 @@ function DashboardPage({ ctx }) {
           value={weekValue}
           sub={week.dayCount > 0 ? `${week.dates.join(' · ')}` : '일정 정보 없음'}
           go="injection"
-        />
-        <Card
-          tone={depletion.tone}
-          title="잉크 소진 임박"
-          value={depletion.count > 0 ? `${depletion.count}건` : '정상'}
-          sub={depletion.count > 0 ? depletionNames : '3일 이내 소진 예상 없음'}
-          go="ink-plan"
         />
       </div>
 
@@ -118,10 +109,10 @@ function DashboardPage({ ctx }) {
 
         <div className="card">
           <div className="card__head">
-            <span className="title">{shortage.count > 0 || depletion.count > 0 ? '재고 위험 상세' : '빠른 작업'}</span>
+            <span className="title">{shortage.count > 0 ? '재고 부족 상세' : '빠른 작업'}</span>
           </div>
           <div className="card__body">
-            {shortage.count > 0 || depletion.count > 0 ? (
+            {shortage.count > 0 ? (
               <div style={{ display: 'grid', gap: 8 }}>
                 {shortage.items.map(it => (
                   <button key={`shortage-${it.ink}`} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
@@ -129,18 +120,10 @@ function DashboardPage({ ctx }) {
                     <span style={{ color: 'var(--bad-600)', fontWeight: 600 }}>부족 {Math.abs(it.weeklyNeed).toLocaleString()}</span>
                   </button>
                 ))}
-                {depletion.items.map(it => (
-                  <button key={`depletion-${it.ink}`} className="btn" style={{ justifyContent: 'space-between' }} onClick={() => setView('ink-plan')}>
-                    <span style={{ fontWeight: 600 }}>{it.ink} · {it.day}요일</span>
-                    <span style={{ color: it.tone === 'bad' ? 'var(--bad-600)' : 'var(--warn-700)', fontWeight: 600 }}>
-                      잔여 {it.availableDays.toLocaleString()}일
-                    </span>
-                  </button>
-                ))}
-                {/* items는 buildDashboardSummary에서 카테고리별 상위 5로 캡 — 넘친 건수는 count로 산출 */}
-                {(shortage.count + depletion.count) > (shortage.items.length + depletion.items.length) && (
+                {/* items는 buildDashboardSummary에서 상위 N으로 캡 — 넘친 건수는 count로 산출 */}
+                {shortage.count > shortage.items.length && (
                   <div style={{ fontSize: 11, color: 'var(--ink-500)', textAlign: 'center' }}>
-                    외 {(shortage.count + depletion.count) - (shortage.items.length + depletion.items.length)}건 — 잉크 생산계획에서 확인
+                    외 {shortage.count - shortage.items.length}건 — 잉크 생산계획에서 확인
                   </div>
                 )}
               </div>

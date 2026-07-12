@@ -361,7 +361,6 @@ function App() {
     return DataService.buildInkPlanningAlerts(data, weekInfo.dates, weekInfo.today);
   }, [data, weekInfo]);
   const inkShortage = inkAlerts.shortage;
-  const inkDepletion = inkAlerts.depletion;
 
   if (!data) {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100vh', color: 'var(--ink-600)' }}>로딩 중…</div>;
@@ -425,19 +424,15 @@ function App() {
   };
 
   // 헤더 bell = 통합 알림 센터(마스터 결함 + 주간 부족 + 3일 이내 소진).
-  // 같은 잉크가 부족·소진 양쪽에 잡히면 1건으로(union) — 알람 피로 방지.
-  const riskInkCount = new Set([
-    ...inkShortage.items.map(i => i.ink),
-    ...inkDepletion.items.map(i => i.ink),
-  ]).size;
-  const bellShow = masterHealth.show || inkShortage.show || inkDepletion.show;
+  // 위험 알림 = 마스터 정합성 + 재고 부족(소진 임박은 사용 안 함).
+  const riskInkCount = new Set(inkShortage.items.map(i => i.ink)).size;
+  const bellShow = masterHealth.show || inkShortage.show;
   const bellCount = (masterHealth.show ? masterHealth.errorCount : 0) + riskInkCount;
   const bellTip = [
     masterHealth.show ? masterHealth.tooltip : null,
     inkShortage.show ? inkShortage.tooltip : null,
-    inkDepletion.show ? inkDepletion.tooltip : null,
   ].filter(Boolean).join(' / ') || '처리 필요 알림 없음';
-  const bellBad = masterHealth.show || inkDepletion.urgentCount > 0;
+  const bellBad = masterHealth.show;
   const bellTo = masterHealth.show ? 'data-quality' : 'ink-plan';
   const bellStyle = bellBad
     ? { background: 'var(--bad-100, oklch(0.95 0.05 25))', borderColor: 'var(--bad-600, oklch(0.55 0.18 25))', color: 'var(--bad-600, oklch(0.55 0.18 25))' }
@@ -512,10 +507,10 @@ function App() {
                 {item.id === 'data-quality' && masterHealth.show && (
                   <span className="sb-item__badge sb-item__badge--alert" title={masterHealth.tooltip}>{masterHealth.errorCount}</span>
                 )}
-                {item.id === 'ink-plan' && (inkShortage.show || inkDepletion.show) && (
+                {item.id === 'ink-plan' && inkShortage.show && (
                   <span
                     className="sb-item__badge sb-item__badge--warn"
-                    title={[inkShortage.show ? inkShortage.tooltip : null, inkDepletion.show ? inkDepletion.tooltip : null].filter(Boolean).join(' / ')}
+                    title={inkShortage.tooltip}
                   >
                     {riskInkCount}
                   </span>
