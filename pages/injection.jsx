@@ -102,11 +102,22 @@ function InjectionPage({ ctx }) {
     return Array.from(s).sort();
   }, [data.products]);
 
+  // TYPE 후보 (ProductEditor용) — products.jsx·review.jsx와 동일 파생.
+  const typeOptionsList = useMemo(() => {
+    const s = new Set(['POWDER', 'LIQUID']);
+    for (const p of data.products) if (p.type) s.add(p.type);
+    return Array.from(s).sort();
+  }, [data.products]);
+
   // 마스터 편집 저장
   const handleMasterSave = (product) => {
     const newData = { ...data };
     if (editingMaster.mode === 'add') {
-      newData.products = [{ ...product, createdFromInjection: true }, ...data.products];
+      newData.products = [{
+        ...product,
+        id: product.id || DataService.allocateProductId(data.products),
+        createdFromInjection: true,
+      }, ...data.products];
       notify(`마스터에 추가: '${product.name}'`);
     } else {
       // 정체성 id 우선 — 동명 제품도 정확히 그 행을 수정(이름 findIndex는 첫 동명에 오적용).
@@ -393,6 +404,7 @@ function InjectionPage({ ctx }) {
             onClose={() => setEditingMaster(null)}
             brands={brandsList}
             allInks={allInksList}
+            typeOptions={typeOptionsList}
           />
         )}
 

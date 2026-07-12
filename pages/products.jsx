@@ -274,7 +274,8 @@ function ProductsPage({ ctx }) {
   );
 }
 
-function ProductEditor({ product, mode, onSave, onClose, brands, allInks, typeOptions }) {
+// typeOptions 기본값은 크래시 방어선 — 호출부가 빠뜨려도 undefined.map 으로 앱이 백지가 되지 않는다(감사 F-01).
+function ProductEditor({ product, mode, onSave, onClose, brands, allInks, typeOptions = ['POWDER', 'LIQUID'] }) {
   const [form, setForm] = useState({
     factory: product.factory || 'C관', // 공장은 C관 전용 — 선택 없이 자동 지정
     name: product.name || '',

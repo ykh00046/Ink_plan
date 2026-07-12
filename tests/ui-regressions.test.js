@@ -181,6 +181,21 @@ test('weekly close is automatic on app load (manual nudge removed)', () => {
   assert.doesNotMatch(dashboard, /마감하러 가기/);       // 자동화로 유도 배너 제거
 });
 
+test('injection wires typeOptions + id into ProductEditor path (F-01)', () => {
+  const injection = fs.readFileSync(path.join(__dirname, '..', 'pages', 'injection.jsx'), 'utf8');
+  const products = fs.readFileSync(path.join(__dirname, '..', 'pages', 'products.jsx'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
+  // 호출부: injection의 ProductEditor 블록이 typeOptions를 전달
+  const editorCall = injection.slice(injection.indexOf('<ProductEditor'));
+  assert.match(editorCall, /typeOptions=\{/);                     // red: 현재 미전달
+  // 정의부: 무방비 .map 방어 기본값
+  assert.match(products, /typeOptions = \['POWDER', 'LIQUID'\]/); // red: 현재 기본값 없음
+  // injection add 경로의 id 부여 (id 없는 제품 생성 방지)
+  assert.match(injection, /allocateProductId/);                   // red: 현재 미호출
+  // 루트 에러 바운더리
+  assert.match(app, /getDerivedStateFromError/);                  // red: 현재 없음
+});
+
 test('relabel belongs only to its original lot row', () => {
   const inv = {
     lots: [

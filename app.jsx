@@ -88,7 +88,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // 앱 리비전 — 배포 시 수동으로 올림 (헤더/푸터에서 단일 출처로 참조)
-const APP_REV = 58;
+const APP_REV = 59;
 
 const ACCENT_PRESETS = {
   blue:   ['oklch(0.28 0.08 245)', 'oklch(0.42 0.12 245)', 'oklch(0.55 0.15 245)', 'oklch(0.95 0.025 245)'],
@@ -801,4 +801,28 @@ function TweaksControls({ tweaks, setTweak }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+// 루트 에러 바운더리 — 렌더 예외 1건이 앱 전체 백지(루트 언마운트)로 번지는 것을 차단.
+// 저장은 300ms debounce라 크래시 직전 편집 대부분은 이미 서버에 저장돼 있다.
+class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[render-crash]', error, info && info.componentStack); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ display: 'grid', placeItems: 'center', height: '100vh', color: 'var(--ink-600)' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>화면 렌더링 중 오류가 발생했습니다</div>
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 16 }}>{String(this.state.error)}</div>
+            <button className="btn btn--primary" onClick={() => location.reload()}>새로고침</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <AppErrorBoundary><App /></AppErrorBoundary>
+);
