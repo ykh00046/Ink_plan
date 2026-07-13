@@ -264,6 +264,19 @@ test('computeInkMetrics: availableDays(round1)·weeklyNeed(월·차주월 포함
   assert.equal(tue.weeklyNeed, null);   // 월이 아니면 null
 });
 
+test('computeInkMetrics: weeklyNeed(필요)는 today 기준 — 오늘 재고 − 오늘부터 남은 소요', () => {
+  const days = ['월', '화', '수'];
+  const merged = [{ name: '빨강', days: { 월: { 현재고: '10' }, 화: {}, 수: {} } }];
+  // 월2 화3 수4 차주월1. today=화 → 남은 소요 = 화3+수4+차주월1 = 8.
+  const demand = new Map([['빨강', new Map([['월', 2], ['화', 3], ['수', 4], ['차주월', 1]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, new Map(), days, '화');
+  assert.equal(res.get('빨강').get('월').weeklyNeed, null);  // 필요는 오늘(화)에만
+  const tue = res.get('빨강').get('화');
+  assert.equal(tue.stock, 8);          // 월 carry 10-2
+  assert.equal(tue.weeklyNeed, 0);     // 8 − (3+4+1=8)
+  assert.equal(res.get('빨강').get('수').weeklyNeed, null);
+});
+
 test('computeInkMetrics: 사출계획에 쓰이는데 재고조사 없는 잉크는 시작 재고 0으로 채움', () => {
   // 소요 있고(active) 재고조사·수동·제조 전무 → 시작 재고 0으로 봐서 재고·가용·주간필요 표시
   const days = ['월', '화'];

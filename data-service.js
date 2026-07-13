@@ -481,10 +481,11 @@
   // 잉크 부족 신호 수집(순수 코어): weeklyNeed < 0 = 월요일 현재고로 주간 총소요 불가.
   // 단일 출처 = computeInkMetrics().weeklyNeed → ink-plan 페이지 빨강 표시와 동일 기준.
   // weeklyNeed는 '월'요일에만 산출되며, 현재고 미입력 잉크는 null → 자동 제외(오탐 방지).
-  function collectInkShortage(merged, computedByInk) {
+  function collectInkShortage(merged, computedByInk, today) {
+    const anchor = today || '월'; // weeklyNeed 기준일(computeInkMetrics anchor와 일치)
     const items = [];
     for (const ink of (merged || [])) {
-      const m = computedByInk.get(ink.name)?.get('월');
+      const m = computedByInk.get(ink.name)?.get(anchor);
       // 실재고(재고조사/수동) 있는 잉크만 — 미조사(0가정) 잉크는 부족 알림서 제외(오탐 방지).
       if (m && m.stockReal && m.weeklyNeed != null && Number(m.weeklyNeed) < 0) {
         items.push({ ink: ink.name, weeklyNeed: Number(m.weeklyNeed) });
@@ -560,9 +561,9 @@
     const demandByInkDay    = buildDemandByInkDay(source.injection, productLookup);
     const inventoryByInkDay = buildInventoryByInkDay(source.inventory, dates);
     const merged            = mergeInkPlanAndTestInks(source.inkPlan, source.testInks, days);
-    const computedByInk     = computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days);
+    const computedByInk     = computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days, today);
     return {
-      shortage: collectInkShortage(merged, computedByInk),
+      shortage: collectInkShortage(merged, computedByInk, today),
       depletion: collectInkDepletionRisks(merged, computedByInk, days, today, threshold),
     };
   }
@@ -1200,7 +1201,7 @@
 
   // 잉크 × 요일 → { stock, required, manufacture, availableDays, weeklyNeed, stockFromInv }
   // stock 우선순위: 수동값 > inventory 연동 > 전날 endStock carry
-  function computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days) {
+  function computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days, today) {
     const result = new Map();
     const toNum = (v) => {
       if (v === null || v === undefined || v === '') return null;
@@ -1209,10 +1210,18 @@
     };
     const round1 = (v) => Math.round(v * 10) / 10;
 
+    // "필요"(weeklyNeed) 기준일 — today 를 주면 오늘 열에, 안 주면 월요일(하위호환).
+    // today='월'이면 남은 소요 = 주간 전체라 기존 동작과 동일.
+    const anchor = (today && days.includes(today)) ? today : '월';
+    const anchorIdx = days.indexOf(anchor);
+    const remainDays = anchorIdx >= 0 ? [...days.slice(anchorIdx), '차주월'] : [...days, '차주월'];
+
     for (const ink of merged) {
       const byDay = new Map();
       const demand = demandByInkDay.get(ink.name) || new Map();
       const totalRequired = [...days, '차주월'].reduce((sum, d) => sum + (demand.get(d) || 0), 0);
+      // 오늘 기준 남은 소요 = 오늘~주말 + 차주월. weeklyNeed = anchor 재고 − 이 합.
+      const remainingRequired = remainDays.reduce((sum, d) => sum + (demand.get(d) || 0), 0);
       // "포함" 잉크 = 사출계획에 쓰이거나(소요>0) 제조량을 입력한 잉크.
       // 이 중 재고조사가 아예 없는 잉크는 시작 재고를 0으로 봐서 재고·가용을 채운다
       // (재고조사 있는 잉크는 그 값이 기준이라 손대지 않음 / 안 쓰는 잉크엔 0을 넣지 않음).
@@ -1235,7 +1244,7 @@
         const required = demand.get(d) || 0;
         const manufacture = toNum(dd['제조량']) || 0;
         const availableDays = stock !== null && required > 0 ? round1(stock / required) : null;
-        const weeklyNeed = d === '월' && stock !== null && totalRequired > 0 ? stock - totalRequired : null;
+        const weeklyNeed = d === anchor && stock !== null && remainingRequired > 0 ? stock - remainingRequired : null;
         // 시작 재고를 모를 때(재고조사·수동 미입력)도 제조를 넣으면 0 기준으로 쌓아 다음날로 이월.
         // 안 그러면 재고 없는 잉크는 제조량을 넣어도 endStock=null 이 되어 재고·가용이 영영 안 뜬다.
         const endStock = stock !== null ? stock + manufacture - required
@@ -1257,7 +1266,7 @@
     return result;
   }
 
-  // 자동 배정 후보: 당일 제조량 비고, 월요일 필요수량 음수(부족)인 정식 잉크. 잠긴 셀 제외.
+  // 자동 배정 후보: 당일 제조량 비고, 오늘 기준 필요수량 음수(부족)인 정식 잉크. 잠긴 셀 제외.
   function buildAutoAssignCandidates(inkPlan, testInks, today, days, computedByInk) {
     const out = [];
     const testMap = new Map((testInks || []).map(t => [t.name, t]));
@@ -1268,7 +1277,7 @@
       const cur = todayCell['제조량'];
       if (cur != null && cur !== '') continue;
 
-      const need = computedByInk.get(ink.name)?.get('월')?.weeklyNeed;
+      const need = computedByInk.get(ink.name)?.get(today)?.weeklyNeed;
       if (need == null || need === '') continue;
       const needNum = Number(need);
       if (isNaN(needNum) || needNum >= 0) continue;

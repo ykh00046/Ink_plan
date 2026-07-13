@@ -115,7 +115,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
         const cellBg = isToday ? 'oklch(0.985 0.012 245)' : undefined;
         // 양산대응 시작 요일부터는 잠금
         const locked = ink.testStatus && days.indexOf(d) >= days.indexOf(ink.startDay || '월');
-        const colspan = d === '월' ? 4 : 3;
+        const colspan = d === today ? 4 : 3;
 
         if (locked) {
           return (
@@ -129,7 +129,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
 
         const stockFromInv = metrics.stockFromInv;
         const displayStock = (dd['현재고'] != null) ? dd['현재고'] : metrics.stock;
-        const weeklyNeed = d === '월' ? metrics.weeklyNeed : null;
+        const weeklyNeed = d === today ? metrics.weeklyNeed : null;
 
         return (
           <React.Fragment key={d}>
@@ -157,7 +157,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
             }}>
               {fmtNum(av)}
             </td>
-            {d === '월' && (
+            {d === today && (
               <td
                 className="num inkplan-cell inkplan-cell--readonly"
                 style={{
@@ -165,7 +165,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
                   color: weeklyNeed != null && Number(weeklyNeed) < 0 ? 'var(--bad-600)' : 'inherit',
                   fontWeight: weeklyNeed != null && Number(weeklyNeed) < 0 ? 600 : 400,
                 }}
-                title="월요일 재고 - 이번 주 사출계획 잉크 필요량 합계"
+                title="오늘 재고 − 오늘부터 남은 소요(오늘~주말 + 차주월) 합계"
               >
                 {fmtNum(weeklyNeed)}
               </td>
@@ -209,7 +209,7 @@ function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
       }
     >
       <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)', padding: 10, background: 'var(--brand-50)', borderRadius: 8 }}>
-        <Icon name="sparkle" size={12} /> 당일 제조량이 비어있고, <strong>월요일 필요수량이 음수(부족)</strong>인 정식 잉크의 빈 제조량 셀에 <strong>|필요수량|</strong> 을 채웁니다. 양산대응 잠금 셀은 제외.
+        <Icon name="sparkle" size={12} /> 당일 제조량이 비어있고, <strong>오늘 필요수량이 음수(부족)</strong>인 정식 잉크의 빈 제조량 셀에 <strong>|필요수량|</strong> 을 채웁니다. 양산대응 잠금 셀은 제외.
       </div>
       {candidates.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-500)' }}>
@@ -220,7 +220,7 @@ function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
           <thead>
             <tr>
               <th>잉크</th>
-              <th style={{ width: 100, textAlign: 'right' }}>필요수량 (월)</th>
+              <th style={{ width: 100, textAlign: 'right' }}>필요수량 (오늘)</th>
               <th style={{ width: 110, textAlign: 'right' }}>제조량 (예정)</th>
             </tr>
           </thead>
@@ -306,8 +306,8 @@ function InkPlanPage({ ctx }) {
   );
 
   const computedByInk = useMemo(
-    () => computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days),
-    [merged, demandByInkDay, inventoryByInkDay],
+    () => computeInkMetrics(merged, demandByInkDay, inventoryByInkDay, days, today),
+    [merged, demandByInkDay, inventoryByInkDay, today],
   );
 
   // 엄격 기준(2026-07): 사출계획 소요량이 있는 잉크만 목록에 넣는다.
@@ -488,7 +488,7 @@ function InkPlanPage({ ctx }) {
                   <th className="sticky-col" rowSpan={2} style={{ width: 170, verticalAlign: 'middle' }}>잉크</th>
                   <th className="sticky-col-2 inkplan-machine-head" rowSpan={2} style={{ width: 100, verticalAlign: 'middle' }}>호기</th>
                   {visibleDays.map(d => {
-                    const colspan = d === '월' ? 4 : 3;
+                    const colspan = d === today ? 4 : 3;
                     return (
                       <th
                         key={d}
@@ -507,7 +507,7 @@ function InkPlanPage({ ctx }) {
                     <React.Fragment key={d}>
                       <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>재고</th>
                       <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>가용</th>
-                      {d === '월' && (
+                      {d === today && (
                         <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>필요</th>
                       )}
                       <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>제조</th>
