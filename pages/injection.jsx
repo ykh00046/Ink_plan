@@ -4,7 +4,7 @@ function InjectionPage({ ctx }) {
   const { data, setData, notify, today, dates, lastMergeInfo } = ctx;
   const [floor, setFloor] = useState('all'); // 기본 전체(3층+1층) — 층 구분 배지로 표시
   const [search, setSearch] = useState('');
-  const [dayFilter, setDayFilter] = useState('3days'); // 7days | 3days
+  const [dayFilter, setDayFilter] = useState('2days'); // 2days | 7days
   const [editing, setEditing] = useState(null); // {floor, mi, day, shift}
   const [dragging, setDragging] = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -12,9 +12,16 @@ function InjectionPage({ ctx }) {
   const [showAlertList, setShowAlertList] = useState(false);
 
   const days = WEEKDAYS_PLUS; // 요일 단일 출처(data-service.js)
-  // 보이는 요일 (3일/7일)
+  // 보이는 요일 (2일/7일)
   const visibleDays = useMemo(() => DataService.getVisibleWeekdays(days, today, dayFilter), [dayFilter, today]);
-  const columns = useMemo(() => DataService.getInjectionColumns(visibleDays), [visibleDays]);
+  // 오늘·명일 모드에선 명일 야간 컬럼 숨김 — 요청서가 주·야·명일주간 구조라 명일 야간은 아직 없음.
+  const columns = useMemo(() => {
+    const cols = DataService.getInjectionColumns(visibleDays);
+    if (dayFilter === '2days' && visibleDays.length === 2) {
+      return cols.filter(c => !(c.day === visibleDays[1] && c.shift === 'night'));
+    }
+    return cols;
+  }, [visibleDays, dayFilter]);
 
   // OCR 머지 직후 — 머지된 요일이 현재 시야 밖이면 dayFilter를 'all'로 자동 확장.
   // (오늘=금인데 OCR 요청일=수 같은 케이스에서 '입력 안 됨'으로 오해되지 않도록)
@@ -25,7 +32,7 @@ function InjectionPage({ ctx }) {
     const visible = DataService.getVisibleWeekdays(days, today, dayFilter);
     const missing = (lastMergeInfo.days || []).filter(d => !visible.includes(d));
     if (missing.length > 0) {
-      setDayFilter('all');
+      setDayFilter('7days');
       notify(`OCR 머지 결과 ${missing.join('·')}요일을 보려면 전체 요일로 펼쳤어`);
     }
   }, [lastMergeInfo]);
@@ -271,8 +278,8 @@ function InjectionPage({ ctx }) {
               value={dayFilter}
               onChange={setDayFilter}
               options={[
-                { value: '3days', label: `3일 (${today}부터)` },
-                { value: '7days', label: '7일 (월~일)' },
+                { value: '2days', label: `오늘·명일 (주·야·주)` },
+                { value: '7days', label: '전체 (월~일)' },
               ]}
             />
             <div className="spacer" />
@@ -287,7 +294,7 @@ function InjectionPage({ ctx }) {
                 <tr>
                   <th className="sticky-col injection-machine-head" rowSpan="2" style={{ width: 90 }}>호기</th>
                   {visibleDays.map(d => (
-                    <th key={d} colSpan="2" className="injection-day-head">
+                    <th key={d} colSpan={columns.filter(c => c.day === d).length} className="injection-day-head">
                       <div>{d}</div>
                       <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--ink-500)', marginTop: 2 }}>{dates[d]}</div>
                     </th>

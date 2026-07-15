@@ -478,7 +478,7 @@
     };
   }
 
-  // 잉크 부족 신호 수집(순수 코어): weeklyNeed < 0 = 월요일 현재고로 주간 총소요 불가.
+  // 잉크 부족 신호 수집(순수 코어): weeklyNeed < 0 = 오늘+내일 소요를 현재고로 감당 불가.
   // 단일 출처 = computeInkMetrics().weeklyNeed → ink-plan 페이지 빨강 표시와 동일 기준.
   // weeklyNeed는 '월'요일에만 산출되며, 현재고 미입력 잉크는 null → 자동 제외(오탐 방지).
   function collectInkShortage(merged, computedByInk, today) {
@@ -619,6 +619,12 @@
   }
 
   function getVisibleWeekdays(days, today, mode) {
+    // 오늘+내일(2일) 창 — 요청서가 주·야·명일주간 구조라 모레 이후 계획은 신뢰할 수 없음.
+    if (mode === '2days') {
+      const idx = days.indexOf(today);
+      if (idx < 0) return today ? [today] : [];
+      return days.slice(idx, Math.min(days.length - 1, idx + 1) + 1);
+    }
     if (mode !== '3days') return days;
     const idx = days.indexOf(today);
     if (idx < 0) return today ? [today] : [];
@@ -1206,16 +1212,19 @@
     const round1 = (v) => Math.round(v * 10) / 10;
 
     // "필요"(weeklyNeed) 기준일 — today 를 주면 오늘 열에, 안 주면 월요일(하위호환).
-    // today='월'이면 남은 소요 = 주간 전체라 기존 동작과 동일.
+    // 필요(weeklyNeed) = anchor 재고 − (오늘+내일 소요). 요청서가 주·야·명일주간 구조라
+    // 다음 날 입력이 전날의 명일 계획을 덮어쓰므로 모레 이후 소요는 신뢰할 수 없어 계산에서 제외.
+    // 일요일이면 내일=차주월.
     const anchor = (today && days.includes(today)) ? today : '월';
     const anchorIdx = days.indexOf(anchor);
-    const remainDays = anchorIdx >= 0 ? [...days.slice(anchorIdx), '차주월'] : [...days, '차주월'];
+    const nextDay = (anchorIdx >= 0 && anchorIdx < days.length - 1) ? days[anchorIdx + 1] : '차주월';
+    const remainDays = [anchor, nextDay];
 
     for (const ink of merged) {
       const byDay = new Map();
       const demand = demandByInkDay.get(ink.name) || new Map();
       const totalRequired = [...days, '차주월'].reduce((sum, d) => sum + (demand.get(d) || 0), 0);
-      // 오늘 기준 남은 소요 = 오늘~주말 + 차주월. weeklyNeed = anchor 재고 − 이 합.
+      // 오늘 기준 남은 소요 = 오늘+내일. weeklyNeed = anchor 재고 − 이 합.
       const remainingRequired = remainDays.reduce((sum, d) => sum + (demand.get(d) || 0), 0);
       // "포함" 잉크 = 사출계획에 쓰이거나(소요>0) 제조량을 입력한 잉크.
       // 이 중 재고조사가 아예 없는 잉크는 시작 재고를 0으로 봐서 재고·가용을 채운다

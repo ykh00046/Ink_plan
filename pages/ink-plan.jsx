@@ -28,7 +28,7 @@ const buildAutoAssignCandidates= DataService.buildAutoAssignCandidates;
 // ── sub-component: 상단 toolbar ─────────────────────────────────────────────
 
 function InkPlanToolbar({
-  search, setSearch, dayFilter, setDayFilter, today, threeDays,
+  search, setSearch, dayFilter, setDayFilter, today, twoDays,
   showTestOnly, setShowTestOnly, testCount, filteredCount,
   sortBy, setSortBy, sortDir, setSortDir,
   autoAssignCount, onAutoAssign,
@@ -46,9 +46,9 @@ function InkPlanToolbar({
         value={dayFilter}
         onChange={setDayFilter}
         options={[
-          { value: 'all', label: '전체 (월~일)' },
           { value: 'today', label: `당일 (${today})` },
-          { value: '3days', label: `3일 (${threeDays.join('·')})` },
+          { value: '2days', label: `오늘·내일 (${twoDays.join('·')})` },
+          { value: 'all', label: '전체 (월~일)' },
         ]}
       />
       <button
@@ -171,16 +171,17 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
               {fmtNum(av)}
             </td>
             {d === today && (
+              // 필요 = 부족량만 양수로 표시 (잉여·미산출은 공란) — 내부 부호는 알림·자동배정용으로 유지
               <td
                 className="num inkplan-cell inkplan-cell--readonly"
                 style={{
                   background: cellBg,
-                  color: weeklyNeed != null && Number(weeklyNeed) < 0 ? 'var(--bad-600)' : 'inherit',
-                  fontWeight: weeklyNeed != null && Number(weeklyNeed) < 0 ? 600 : 400,
+                  color: 'var(--bad-600)',
+                  fontWeight: 600,
                 }}
-                title="오늘 재고 − 오늘부터 남은 소요(오늘~주말 + 차주월) 합계"
+                title="부족량 = (오늘+내일 소요) − 오늘 재고, 부족할 때만 표시 — 명일 이후 계획은 다음 요청서가 덮어쓰므로 제외"
               >
-                {fmtNum(weeklyNeed)}
+                {weeklyNeed != null && Number(weeklyNeed) < 0 ? fmtNum(Math.abs(weeklyNeed)) : ''}
               </td>
             )}
             <td className="num inkplan-cell inkplan-cell--manu" style={{
@@ -241,7 +242,7 @@ function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
             {candidates.map(c => (
               <tr key={c.name}>
                 <td style={{ fontWeight: 500 }}>{c.name}</td>
-                <td style={{ textAlign: 'right', color: 'var(--bad-600)', fontFamily: 'JetBrains Mono, monospace' }}>{c.need}</td>
+                <td style={{ textAlign: 'right', color: 'var(--bad-600)', fontFamily: 'JetBrains Mono, monospace' }}>{Math.abs(c.need)}</td>
                 <td style={{ textAlign: 'right', color: 'var(--brand-700)', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace' }}>{c.suggested}</td>
               </tr>
             ))}
@@ -257,20 +258,20 @@ function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
 function InkPlanPage({ ctx }) {
   const { data, setData, notify, today, dates } = ctx;
   const [search, setSearch] = useState('');
-  const [dayFilter, setDayFilter] = useState('3days'); // all | today | 3days
+  const [dayFilter, setDayFilter] = useState('2days'); // all | today | 2days
   const [showTestOnly, setShowTestOnly] = useState(false);
   const [sortBy, setSortBy] = useState('urgent'); // urgent | machine | name | stock | avail
   const [sortDir, setSortDir] = useState('asc');
   const [showAutoAssign, setShowAutoAssign] = useState(false);
 
   const days = INKPLAN_DAYS;
-  const threeDays = useMemo(() => DataService.getVisibleWeekdays(days, today, '3days'), [today]);
+  const twoDays = useMemo(() => DataService.getVisibleWeekdays(days, today, '2days'), [today]);
 
   const visibleDays = useMemo(() => {
     if (dayFilter === 'today') return [today];
-    if (dayFilter === '3days') return threeDays;
+    if (dayFilter === '2days') return twoDays;
     return days;
-  }, [dayFilter, today, threeDays]);
+  }, [dayFilter, today, twoDays]);
 
   const productLookup = useMemo(() => buildProductLookup(data.products), [data.products]);
   const productsUsingInk = useMemo(
@@ -443,7 +444,7 @@ function InkPlanPage({ ctx }) {
             dayFilter={dayFilter}
             setDayFilter={setDayFilter}
             today={today}
-            threeDays={threeDays}
+            twoDays={twoDays}
             showTestOnly={showTestOnly}
             setShowTestOnly={setShowTestOnly}
             testCount={testCount}

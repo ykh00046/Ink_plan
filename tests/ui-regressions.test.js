@@ -14,6 +14,13 @@ test('builds a three-day window from today forward', () => {
   assert.deepEqual(DataService.getVisibleWeekdays(days, 'Thu', '7days'), days);
 });
 
+test('builds a two-day window (today + tomorrow) from today forward', () => {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  assert.deepEqual(DataService.getVisibleWeekdays(['Mon', 'Tue'], 'Tue', '2days'), ['Tue']);
+  assert.deepEqual(DataService.getVisibleWeekdays(days, 'Fri', '2days'), ['Fri', 'Sat']);
+});
+
 test('upserts and removes machine assignments by ink name', () => {
   const assignments = [
     { ink: 'A', machine: '10' },

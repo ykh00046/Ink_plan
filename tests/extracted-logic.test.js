@@ -263,7 +263,7 @@ test('computeInkMetrics: 수동 현재고 우선 + endStock carry 전파', () =>
   assert.equal(tue.required, 3);
 });
 
-test('computeInkMetrics: availableDays(round1)·weeklyNeed(월·차주월 포함) 파생', () => {
+test('computeInkMetrics: availableDays(round1)·weeklyNeed(오늘+내일 소요) 파생', () => {
   // weeklyNeed/availableDays 는 부족 알림(collectInkShortage/auto-assign)의 단일 소스 — 부호·반올림 고정
   const days = ['월', '화'];
   const merged = [{ name: '빨강', days: { 월: { 현재고: '10' }, 화: {} } }];
@@ -271,24 +271,36 @@ test('computeInkMetrics: availableDays(round1)·weeklyNeed(월·차주월 포함
   const res = DataService.computeInkMetrics(merged, demand, new Map(), days);
   const mon = res.get('빨강').get('월');
   assert.equal(mon.availableDays, 5);   // round1(10/2)
-  assert.equal(mon.weeklyNeed, 1);      // 10 - (2+3+4=9), 차주월 포함
+  assert.equal(mon.weeklyNeed, 5);      // 10 - (2+3=5), 오늘+내일만 (차주월 제외)
   const tue = res.get('빨강').get('화');
   assert.equal(tue.stock, 8);           // carry 10+0-2
   assert.equal(tue.availableDays, 2.7); // round1(8/3)
   assert.equal(tue.weeklyNeed, null);   // 월이 아니면 null
 });
 
-test('computeInkMetrics: weeklyNeed(필요)는 today 기준 — 오늘 재고 − 오늘부터 남은 소요', () => {
+test('computeInkMetrics: weeklyNeed(필요)는 today 기준 — 오늘 재고 − (오늘+내일 소요)', () => {
   const days = ['월', '화', '수'];
   const merged = [{ name: '빨강', days: { 월: { 현재고: '10' }, 화: {}, 수: {} } }];
-  // 월2 화3 수4 차주월1. today=화 → 남은 소요 = 화3+수4+차주월1 = 8.
+  // 월2 화3 수4 차주월1. today=화 → 소요 = 오늘(화3)+내일(수4) = 7. 모레 이후·차주월 제외.
   const demand = new Map([['빨강', new Map([['월', 2], ['화', 3], ['수', 4], ['차주월', 1]])]]);
   const res = DataService.computeInkMetrics(merged, demand, new Map(), days, '화');
   assert.equal(res.get('빨강').get('월').weeklyNeed, null);  // 필요는 오늘(화)에만
   const tue = res.get('빨강').get('화');
   assert.equal(tue.stock, 8);          // 월 carry 10-2
-  assert.equal(tue.weeklyNeed, 0);     // 8 − (3+4+1=8)
+  assert.equal(tue.weeklyNeed, 1);     // 8 − (3+4=7)
   assert.equal(res.get('빨강').get('수').weeklyNeed, null);
+});
+
+test('computeInkMetrics: 일요일이면 내일=차주월 — weeklyNeed에 차주월 소요 포함', () => {
+  // 요청서가 주·야·명일주간 구조라 일요일의 "내일"은 다음 주 월요일(차주월).
+  const days = ['월', '화', '수', '목', '금', '토', '일'];
+  const merged = [{ name: '빨강', days: { 월: {}, 화: {}, 수: {}, 목: {}, 금: {}, 토: {}, 일: { 현재고: '10' } } }];
+  // 일2 차주월5. today=일 → 남은 소요 = 일2 + 차주월5 = 7.
+  const demand = new Map([['빨강', new Map([['일', 2], ['차주월', 5]])]]);
+  const res = DataService.computeInkMetrics(merged, demand, new Map(), days, '일');
+  const sun = res.get('빨강').get('일');
+  assert.equal(sun.stock, 10);
+  assert.equal(sun.weeklyNeed, 3);     // 10 − (2+5=7)
 });
 
 test('computeInkMetrics: 사출계획에 쓰이는데 재고조사 없는 잉크는 시작 재고 0으로 채움', () => {
@@ -300,7 +312,7 @@ test('computeInkMetrics: 사출계획에 쓰이는데 재고조사 없는 잉크
   const mon = res.get('파랑').get('월');
   assert.equal(mon.stock, 0);           // 재고조사 없는 소요잉크 → 0 기준
   assert.equal(mon.availableDays, 0);   // 0/2
-  assert.equal(mon.weeklyNeed, -3);     // 0 - (2+1) → 이번 주 3 부족
+  assert.equal(mon.weeklyNeed, -2);     // 0 - (2+0) → 오늘+내일 2 부족 (차주월 제외)
   assert.equal(res.get('파랑').get('화').stock, -2); // 0 - 2 carry(부족 노출)
 });
 
