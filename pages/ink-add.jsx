@@ -30,6 +30,8 @@ function InkAddPage({ ctx }) {
   const [search, setSearch] = useState('');
   const [floor, setFloor] = useState('all');
   const [newInk, setNewInk] = useState({ name: '', f3: '', f1: '' });
+  const undoStack = useRef([]);
+  const [undoCount, setUndoCount] = useState(0);
 
   const WEEK = WEEKDAYS; // 요일 단일 출처(data-service.js)
 
@@ -79,6 +81,32 @@ function InkAddPage({ ctx }) {
   const edits = editState.edits || {};
   const hidden = editState.hidden || [];
 
+  // 1단계 실행취소(Ctrl+Z) — 매 mutation 직전에 현재 editState 를 스냅샷
+  const pushUndo = () => {
+    undoStack.current.push(editState);
+    if (undoStack.current.length > 50) undoStack.current.shift();
+    setUndoCount(undoStack.current.length);
+  };
+  const undo = () => {
+    const prev = undoStack.current.pop();
+    if (!prev) return;
+    setUndoCount(undoStack.current.length);
+    setData({ ...data, inkAdd: prev });
+    notify('마지막 수정 되돌림 (Ctrl+Z)');
+  };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  useEffect(() => {
+    const h = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoRef.current();
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
   // 표시 행 = 자동 ∪ 수동추가, hidden 제외. 수동값이 있으면 우선.
   const rows = useMemo(() => {
     const hiddenSet = new Set(hidden);
@@ -107,7 +135,7 @@ function InkAddPage({ ctx }) {
     }
     if (floor === '3') list = list.filter(i => i.f3 > 0);
     if (floor === '1') list = list.filter(i => i.f1 > 0);
-    return [...list].sort((a, b) => b.total - a.total);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, search, floor]);
 
   const totals = useMemo(() => {
@@ -123,16 +151,19 @@ function InkAddPage({ ctx }) {
   const setEdit = (name, f3, f1) => {
     writeState({ edits: { ...edits, [name]: { f3, f1 } }, hidden: hidden.filter(h => h !== name) });
   };
+  // 수정한 층만 sparse 저장 — 다른 층은 계속 자동값을 따라가서 전체/3층/1층 어느 뷰에서 고쳐도 일관됨
   const changeQty = (name, key, val) => {
-    const row = rows.find(r => r.name === name) || { f3: 0, f1: 0 };
-    setEdit(name, key === 'f3' ? val : row.f3, key === 'f1' ? val : row.f1);
+    pushUndo();
+    writeState({ edits: { ...edits, [name]: { ...(edits[name] || {}), [key]: val } }, hidden: hidden.filter(h => h !== name) });
   };
   const resetRow = (name) => {
+    pushUndo();
     const nextEdits = { ...edits }; delete nextEdits[name];
     writeState({ edits: nextEdits, hidden: hidden.filter(h => h !== name) });
     notify(`'${name}' 자동값으로 복원`);
   };
   const deleteRow = (name) => {
+    pushUndo();
     const nextEdits = { ...edits }; delete nextEdits[name];
     const nextHidden = autoMap.has(name) ? Array.from(new Set([...hidden, name])) : hidden;
     writeState({ edits: nextEdits, hidden: nextHidden });
@@ -141,6 +172,7 @@ function InkAddPage({ ctx }) {
   const resetAll = () => {
     if (editedCount === 0) { notify('수동 변경 없음 — 이미 자동값입니다'); return; }
     if (!confirm('수동 변경(수량·삭제·추가)을 모두 지우고 사출계획 자동값으로 되돌릴까요?')) return;
+    pushUndo();
     writeState({ edits: {}, hidden: [] });
     notify('사출계획 자동값으로 리셋됨');
   };
@@ -150,6 +182,7 @@ function InkAddPage({ ctx }) {
     const f3 = newInk.f3.trim() === '' ? 0 : Math.max(0, parseInt(newInk.f3, 10) || 0);
     const f1 = newInk.f1.trim() === '' ? 0 : Math.max(0, parseInt(newInk.f1, 10) || 0);
     if (f3 === 0 && f1 === 0) { notify('3층 또는 1층 수량을 입력하세요'); return; }
+    pushUndo();
     setEdit(name, f3, f1);
     setNewInk({ name: '', f3: '', f1: '' });
     notify(`'${name}' 추가됨`);
@@ -164,7 +197,7 @@ function InkAddPage({ ctx }) {
   // 층별 복사 — 현재(수동 반영) 수량 기준
   const copyFloor = (fl) => {
     const key = fl === '3' ? 'f3' : 'f1';
-    const lines = rows.filter(i => i[key] > 0).sort((a, b) => b[key] - a[key]).map(i => `${i.name}\t${i[key]}`);
+    const lines = rows.filter(i => i[key] > 0).sort((a, b) => a.name.localeCompare(b.name)).map(i => `${i.name}\t${i[key]}`);
     if (lines.length === 0) { notify(`${fl}층 넣어줄 잉크 없음`); return; }
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(lines.join('\n'))
@@ -189,6 +222,7 @@ function InkAddPage({ ctx }) {
             </div>
           </div>
           <div className="page__actions">
+            <button className='btn' onClick={undo} disabled={undoCount === 0} title='마지막 수정 1건 취소 (Ctrl+Z)'>↶ 되돌리기{undoCount > 0 ? ` ${undoCount}` : ''}</button>
             <button className="btn" onClick={resetAll} disabled={editedCount === 0} title="수동 변경을 모두 지우고 사출계획 자동값으로 복원">
               <Icon name="refresh" size={12} /> 리셋
             </button>
@@ -224,7 +258,7 @@ function InkAddPage({ ctx }) {
           <div className="toolbar no-print">
             <input className="input input--search" placeholder="잉크명 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
             <div className="spacer" />
-            <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filtered.length}종 · 많이 필요한 순</span>
+            <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filtered.length}종 · 알파벳순</span>
           </div>
           <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 320px)' }}>
             <table className="tbl">
