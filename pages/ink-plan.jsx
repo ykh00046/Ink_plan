@@ -31,6 +31,7 @@ function InkPlanToolbar({
   search, setSearch, dayFilter, setDayFilter, today, threeDays,
   showTestOnly, setShowTestOnly, testCount, filteredCount,
   sortBy, setSortBy, sortDir, setSortDir,
+  autoAssignCount, onAutoAssign,
 }) {
   return (
     <div className="toolbar">
@@ -80,6 +81,18 @@ function InkPlanToolbar({
         <span className="inkplan-legend__swatch" /> 재고 조사 연동
       </span>
       <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{filteredCount}건</span>
+      <button className="btn btn--sm" title="생산계획 내보내기"><Icon name="download" size={11} /> 내보내기</button>
+      <button
+        className={`btn btn--sm ${autoAssignCount > 0 ? 'btn--emphasis-brand' : ''}`}
+        onClick={onAutoAssign}
+        disabled={autoAssignCount === 0}
+        title={autoAssignCount === 0
+          ? `당일(${today}) 자동 배정 대상이 없어 (제조량 비어있고 필요수량 음수인 정식 잉크)`
+          : `당일(${today}) ${autoAssignCount}개 잉크 자동 배정 가능`}
+      >
+        <Icon name="sparkle" size={11} /> 자동 배정
+        {autoAssignCount > 0 && <span className="btn--count-badge">({autoAssignCount})</span>}
+      </button>
     </div>
   );
 }
@@ -422,37 +435,6 @@ function InkPlanPage({ ctx }) {
 
   return (
     <div className="page">
-      <div className="page__head">
-        <div className="page__title-row">
-          <div>
-            <div className="page__title">잉크 생산계획</div>
-            <div className="page__meta-chips">
-              <span className="page__meta-chip">정식 <strong>{data.inkPlan.length}</strong>종</span>
-              {testCount > 0 && (
-                <span className="page__meta-chip page__meta-chip--warn">양산대응 <strong>{testCount}</strong>종</span>
-              )}
-              <span className="page__meta-chip page__meta-chip--today">오늘 {dates[today]} ({today})</span>
-            </div>
-          </div>
-          <div className="page__actions">
-            <button className="btn"><Icon name="download" /> 내보내기</button>
-            <button
-              className={`btn ${autoAssignCandidates.length > 0 ? 'btn--emphasis-brand' : ''}`}
-              onClick={() => setShowAutoAssign(true)}
-              disabled={autoAssignCandidates.length === 0}
-              title={autoAssignCandidates.length === 0
-                ? `당일(${today}) 자동 배정 대상이 없어 (제조량 비어있고 필요수량 음수인 정식 잉크)`
-                : `당일(${today}) ${autoAssignCandidates.length}개 잉크 자동 배정 가능`}
-            >
-              <Icon name="sparkle" size={12} /> 자동 배정
-              {autoAssignCandidates.length > 0 && (
-                <span className="btn--count-badge">({autoAssignCandidates.length})</span>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="page__body">
         <Card flush>
           <InkPlanToolbar
@@ -470,6 +452,8 @@ function InkPlanPage({ ctx }) {
             setSortBy={setSortBy}
             sortDir={sortDir}
             setSortDir={setSortDir}
+            autoAssignCount={autoAssignCandidates.length}
+            onAutoAssign={() => setShowAutoAssign(true)}
           />
 
           <div className="legend-row no-print">
@@ -481,7 +465,7 @@ function InkPlanPage({ ctx }) {
             <span className="legend-row__item"><span className="legend-row__dot" style={{ background: 'var(--warn-500)' }} /> <strong style={{ color: 'var(--warn-600)', fontWeight: 600 }}>주의</strong> — 가용 3일 이하</span>
           </div>
 
-          <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 340px)' }}>
+          <div className={`tbl-wrap inkplan-tbl-wrap ${visibleDays.length === 1 ? 'inkplan-tbl-wrap--narrow' : ''}`} style={{ maxHeight: 'calc(100vh - 170px)' }}>
             <table className="tbl inkplan-tbl">
               <thead>
                 <tr>

@@ -129,7 +129,7 @@ function useInventoryPrintStyle() {
 function InventoryRow({
   initialLot, gi, inv, currentDate, today, visibleDates, isCurrent,
   addingFor, addingLotNo, addingRef, setAddingLotNo, onConfirmAddLot, onCancelAddLot,
-  onSetStock, onDeleteLot, onRelabelInk, onStartAddLot, onMoveRow,
+  onSetStock, onDeleteLot, onRelabelInk, onStartAddLot, onMoveRow, onPasteColumn,
   isLast,
 }) {
   const BG = INVENTORY_BG;
@@ -146,7 +146,7 @@ function InventoryRow({
 
   return (
     <React.Fragment>
-      <tr style={{ height: 40, background: rowBg }}>
+      <tr style={{ height: 30, background: rowBg }}>
         <td className="row-num" style={{ background: BG.num }}>{gi + 1}</td>
         <td className="inv-ink ink-name">{initialLot.ink}</td>
         {/* 실제 LOT = 3차 > 2차 > 최초 */}
@@ -195,6 +195,14 @@ function InventoryRow({
                           if (e.key === 'Enter') {
                             e.preventDefault();
                             focusNextInColumn(e.currentTarget);
+                          }
+                        }}
+                        onPaste={e => {
+                          // 여러 줄 클립보드(엑셀 세로 열) → 이 행부터 아래로 채움. 단일 값은 기본 붙여넣기 유지.
+                          const text = e.clipboardData?.getData('text') || '';
+                          if (/[\r\n]/.test(text.trim()) && onPasteColumn) {
+                            e.preventDefault();
+                            onPasteColumn(gi, text);
                           }
                         }}
                       />
@@ -270,7 +278,7 @@ function InventoryRow({
         </td>
         {/* 액션 */}
         <td className="no-print" style={{ textAlign: 'center', background: BG.num, borderLeft: '2px solid var(--ink-200)' }}>
-          <div style={{ display: 'inline-flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'inline-flex', gap: 4, justifyContent: 'center', flexWrap: 'nowrap' }}>
             <button
               className="btn btn--sm"
               onClick={() => onRelabelInk(initialLot)}
@@ -399,7 +407,7 @@ function NewLotFooterRow({ newLot, setNewLot, newLotRef, previewInk, previewOrde
 
 // ── BulkAddModal ─────────────────────────────────────────────────────────────
 // Lot 일괄 추가 모달 — 줄바꿈/탭으로 구분된 Lot No 들을 한번에 입력.
-function BulkAddModal({ bulkText, setBulkText, bulkResult, onAdd, onClose }) {
+function BulkAddModal({ bulkText, setBulkText, bulkResult, onAdd, onClose, onRegisterUnknown }) {
   return (
     <Modal
       title="Lot 일괄 추가"
@@ -446,11 +454,20 @@ function BulkAddModal({ bulkText, setBulkText, bulkResult, onAdd, onClose }) {
               </div>
               <ul style={{ margin: '4px 0 0 16px', color: 'var(--ink-700)', maxHeight: 120, overflowY: 'auto' }}>
                 {bulkResult.failed.map((f, i) => (
-                  <li key={i}>
+                  <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                     <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{f.lotNo}</code>
                     {' — '}
-                    {f.reason === 'no-ink' ? '잉크 마스터에 없음 (잉크 추가 페이지에서 먼저 등록)' :
-                     f.reason === 'dup' ? '이미 등록됨' : '오류'}
+                    <span>{f.reason === 'no-ink' ? '잉크 마스터에 없음' :
+                     f.reason === 'dup' ? '이미 등록됨' : '오류'}</span>
+                    {f.reason === 'no-ink' && onRegisterUnknown && (
+                      <button
+                        className="btn btn--sm btn--primary"
+                        style={{ padding: '1px 8px', fontSize: 11 }}
+                        onClick={() => onRegisterUnknown(f.lotNo)}
+                      >
+                        <Icon name="plus" size={10} /> 잉크 등록
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -462,6 +479,90 @@ function BulkAddModal({ bulkText, setBulkText, bulkResult, onAdd, onClose }) {
   );
 }
 
+// ── AddInkModal ──────────────────────────────────────────────────────────────
+// 미등록 Lot을 입력했을 때, 그 자리에서 잉크 마스터에 등록하는 팝업.
+// 잉크명 앞글자(lotPrefix)가 Lot 번호와 일치해야 함 + 품목코드 필수 + 중복 방지.
+function AddInkModal({ lotNo, machineOptions, dupCode, dupInk, onRegister, onClose }) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [machine, setMachine] = useState('');
+  const nameT = name.trim();
+  const codeT = code.trim();
+  const prefix = nameT ? DataService.lotPrefix(nameT) : '';
+  const v = nameT ? DataService.validateInkForLot(lotNo, nameT) : { ok: false, reason: 'no-name' };
+  const codeDup = codeT ? dupCode(codeT) : false;
+  const inkDup = nameT ? dupInk(nameT) : false;
+  const canRegister = v.ok && codeT && !codeDup && !inkDup;
+  const nameMsg =
+    !nameT ? '' :
+    v.reason === 'no-prefix' ? '잉크명에 영문/숫자가 있어야 Lot과 매칭됩니다' :
+    v.reason === 'prefix-mismatch' ? `앞글자(${prefix})가 이 Lot 번호와 일치하지 않습니다` :
+    inkDup ? '이미 등록된 잉크명입니다' :
+    `Lot 매칭 prefix: ${prefix} ✓`;
+  const listId = 'addink-machine-list';
+
+  return (
+    <Modal
+      title="미등록 잉크 등록"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>취소</button>
+          <button className="btn btn--primary" disabled={!canRegister}
+            onClick={() => onRegister({ name: nameT, code: codeT, machine: machine.trim() })}>
+            <Icon name="plus" size={11} /> 등록하고 재고에 추가
+          </button>
+        </>
+      }
+    >
+      <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)' }}>
+        이 Lot 번호는 잉크 마스터에 없습니다:{' '}
+        <code style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: 'var(--bad-600)' }}>{lotNo}</code>
+        <br />잉크를 마스터에 등록하면 이 Lot이 재고 조사에 함께 추가됩니다.
+      </div>
+
+      <div className="field" style={{ marginBottom: 10 }}>
+        <label className="field__label">잉크명 <span style={{ color: 'var(--bad-600)' }}>*</span></label>
+        <input
+          className="input"
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="예: SHADOW"
+        />
+        {nameT && (
+          <div className="field__hint" style={{ color: v.ok && !inkDup ? 'var(--ok-600)' : 'var(--bad-600)' }}>
+            {nameMsg}
+          </div>
+        )}
+      </div>
+
+      <div className="field" style={{ marginBottom: 10 }}>
+        <label className="field__label">품목코드 <span style={{ color: 'var(--bad-600)' }}>*</span></label>
+        <input
+          className="input"
+          value={code}
+          onChange={e => setCode(e.target.value)}
+          placeholder="품목코드 (필수)"
+        />
+        {codeDup && <div className="field__hint" style={{ color: 'var(--bad-600)' }}>이미 등록된 품목코드입니다</div>}
+      </div>
+
+      <div className="field">
+        <label className="field__label">호기 (선택)</label>
+        <input
+          className="input"
+          list={listId}
+          value={machine}
+          onChange={e => setMachine(e.target.value)}
+          placeholder="예: 3호기"
+        />
+        <datalist id={listId}>{machineOptions.map(m => <option key={m} value={m} />)}</datalist>
+      </div>
+    </Modal>
+  );
+}
+
 // ── InventoryPage ────────────────────────────────────────────────────────────
 function InventoryPage({ ctx }) {
   const { data, setData, notify } = ctx;
@@ -469,7 +570,7 @@ function InventoryPage({ ctx }) {
 
   // ── state ──
   const [today, setToday] = useState(() => localDateISO());
-  const [viewRange, setViewRange] = useState('3days'); // today | 3days | all
+  const [viewRange, setViewRange] = useState('today'); // today | 3days | all
   const [search, setSearch] = useState('');
   const [newLot, setNewLot] = useState('');
   const [addingFor, setAddingFor] = useState(null);
@@ -477,6 +578,7 @@ function InventoryPage({ ctx }) {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [bulkResult, setBulkResult] = useState(null);
+  const [addInkFor, setAddInkFor] = useState(null); // { lotNo, source: 'single'|'bulk' } | null
   const newLotRef = useRef(null);
   const addingRef = useRef(null);
   const autoCreatedTodayRef = useRef(false);
@@ -683,7 +785,8 @@ function InventoryPage({ ctx }) {
   const handleAddNew = () => {
     const result = registerLot(newLot, inv);
     if (!result.ok) {
-      if (result.reason === 'no-ink') notify(`'${result.lotNo}' 의 잉크가 마스터에 없습니다. [잉크 추가] 페이지에서 먼저 등록하세요`);
+      // 마스터에 없는 잉크 → 그 자리에서 등록하도록 팝업 (거부 대신)
+      if (result.reason === 'no-ink') { setAddInkFor({ lotNo: newLot.trim(), source: 'single' }); return; }
       else if (result.reason === 'dup') notify(`Lot '${result.lotNo}' 는 이미 등록되어 있습니다`);
       return;
     }
@@ -693,6 +796,64 @@ function InventoryPage({ ctx }) {
     notify(`${result.lot.ink} · ${result.lot.lotNo} 신규 생산 LOT 등록`);
     setNewLot('');
     setTimeout(() => newLotRef.current?.focus(), 0);
+  };
+
+  // ── 미등록 잉크: 그 자리에서 마스터 등록 + 해당 Lot 재고 조사에 추가 ──
+  // 잉크 마스터(machineAssignments+inkPlan)와 재고 lot을 한 번의 setData로 함께 반영.
+  const machineOptions = useMemo(
+    () => [...new Set((data.machineAssignments || []).map(a => a.machine).filter(Boolean))],
+    [data.machineAssignments]
+  );
+  const dupCode = (c) => (data.machineAssignments || []).some(a => (a.code || '').trim() === c.trim());
+  const dupInk = (n) => {
+    const nn = DataService.normalizeInkName(n);
+    return (data.machineAssignments || []).some(a => DataService.normalizeInkName(a.ink) === nn)
+      || (data.inkPlan || []).some(i => DataService.normalizeInkName(i.name) === nn);
+  };
+
+  // 팝업에서 [등록] → 마스터 등록 + Lot 추가. 성공 시 생성된 lot 반환, 실패 시 null.
+  const registerUnknownInk = ({ lotNo, name, code, machine }) => {
+    const v = DataService.validateInkForLot(lotNo, name);
+    if (!v.ok) {
+      notify(v.reason === 'prefix-mismatch'
+        ? `잉크명 앞글자가 Lot '${lotNo}' 와 일치하지 않습니다`
+        : '잉크명을 확인하세요');
+      return null;
+    }
+    if (!code.trim()) { notify('품목코드를 입력해야 등록할 수 있어'); return null; }
+    if (dupCode(code)) { notify(`품목코드 '${code}' 는 이미 등록되어 있어`); return null; }
+    if (dupInk(name)) { notify(`'${name}' 잉크는 이미 등록되어 있어`); return null; }
+
+    // 1) 잉크 마스터 등록 (순수 함수 — machineAssignments + inkPlan)
+    let nd = DataService.addInkToMaster(data, { name, code: code.trim(), machine });
+    // 2) 해당 Lot을 재고 조사(초기 lot)로 추가
+    const curInv = nd.inventory || { lots: [], daily: {} };
+    const ln = lotNo.toUpperCase().trim();
+    const lot = {
+      id: `L${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ink: name, lotNo: ln, registeredDate: DataService.dateFromLotNo(ln, today), order: 1, role: 'initial',
+    };
+    const invNext = { ...curInv, lots: [...(curInv.lots || []), lot] };
+    invNext.order = appendOrderForNewInitial(invNext, lot);
+    setData({ ...nd, inventory: invNext });
+    notify(`'${name}' 잉크 마스터 등록 · Lot ${ln} 재고에 추가됨`);
+    return lot;
+  };
+
+  // 팝업 [등록] 콜백 — 단일/일괄 경로 공통. 성공 시 bulkResult 갱신 또는 신규입력 초기화.
+  const handleRegisterInk = ({ name, code, machine }) => {
+    if (!addInkFor) return;
+    const created = registerUnknownInk({ lotNo: addInkFor.lotNo, name, code, machine });
+    if (!created) return;
+    if (addInkFor.source === 'bulk') {
+      setBulkResult(prev => prev ? {
+        added: [...prev.added, created],
+        failed: prev.failed.filter(f => f.lotNo.toUpperCase().trim() !== created.lotNo),
+      } : prev);
+    } else {
+      setNewLot('');
+    }
+    setAddInkFor(null);
   };
 
   const startAddLot = (initialLot) => {
@@ -781,6 +942,29 @@ function InventoryPage({ ctx }) {
     setData({ ...data, inventory: { ...inv, daily: newDaily } });
   };
 
+  // 오늘 열에 세로 붙여넣기 — startGi 행부터 화면 순서대로 아래로 채움(Enter 이동과 동일 순서).
+  // 붙여넣은 줄 수만큼 행을 진행하되, 숫자만 기록(빈칸/비숫자 줄은 자리만 건너뜀 → 엑셀 정렬 유지).
+  // 여러 칸을 한 번의 setData 로 일괄 반영(중간 clobber 방지).
+  const pasteStockColumn = (startGi, text) => {
+    if (!currentDate) return;
+    const parsed = DataService.parsePastedStockColumn(text);
+    if (parsed.length === 0) return;
+    const dayMap = { ...(inv.daily[currentDate] || {}) };
+    let written = 0, skipped = 0;
+    for (let i = 0; i < parsed.length; i++) {
+      const row = visibleLots[startGi + i];
+      if (!row) break;                          // 행보다 값이 많으면 남는 값은 무시
+      if (parsed[i].num == null) { skipped++; continue; }
+      const actual = DataService.actualInventoryLotForInitial(inv.lots, row, currentDate);
+      if (!actual) { skipped++; continue; }
+      dayMap[actual.id] = parsed[i].num;
+      written++;
+    }
+    if (written === 0) { notify('붙여넣을 숫자 값이 없습니다'); return; }
+    setData({ ...data, inventory: { ...inv, daily: { ...inv.daily, [currentDate]: dayMap } } });
+    notify(`${written}개 칸 붙여넣기 완료${skipped ? ` · ${skipped}칸 건너뜀` : ''}`);
+  };
+
   const deleteLot = (lot) => {
     if (!lot) return;
     if (!confirm(`${lot.ink} · ${lot.lotNo} 를 삭제할까요? 입력된 재고도 함께 삭제됩니다.`)) return;
@@ -826,37 +1010,9 @@ function InventoryPage({ ctx }) {
         <div className="page__title-row">
           <div>
             <div className="page__title">잉크 재고 조사</div>
-            {currentDate ? (
-              <div className="page__meta-chips">
-                <span className="page__meta-chip page__meta-chip--today">
-                  마지막 기록 {invFmtDate(currentDate)} ({invDayKor(currentDate)})
-                </span>
-                <span className="page__meta-chip">행 <strong>{visibleLots.length}</strong></span>
-                <span className="page__meta-chip">Lot <strong>{visibleLots.length}</strong></span>
-                <span className="page__meta-chip">오늘 입력 <strong>{currentCount}</strong></span>
-                <span className="page__meta-chip" style={{ background: 'var(--info-100)', color: 'var(--info-600)' }} title="여기서 입력한 오늘 재고가 잉크 생산계획의 '재고' 셀에 자동 반영됩니다">생산계획에 자동 반영</span>
-              </div>
-            ) : (
-              <div className="page__meta">오늘 일자가 자동 생성됩니다. 필요하면 우측 [이어서 생성] 버튼으로 다시 확인하세요.</div>
+            {!currentDate && (
+              <div className="page__meta">오늘 일자가 자동 생성됩니다. [이어서 생성] 버튼으로 다시 확인하세요.</div>
             )}
-          </div>
-          <div className="page__actions">
-            <button className="btn btn--sm" onClick={() => setBulkOpen(true)}>
-              <Icon name="upload" size={11} /> 일괄 추가
-            </button>
-            <button className="btn btn--sm" onClick={() => excelInputRef.current?.click()} title="잉크 재고 조사표(.xlsx)를 읽어 선택한 날짜 컬럼 값을 오늘 재고로 입력">
-              <Icon name="image" size={11} /> 엑셀 불러오기
-            </button>
-            <input
-              ref={excelInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              style={{ display: 'none' }}
-              onChange={e => { handleExcelFile(e.target.files?.[0]); e.target.value = ''; }}
-            />
-            <button className="btn btn--sm" onClick={() => window.print()}>
-              <Icon name="download" size={11} /> 인쇄
-            </button>
           </div>
         </div>
       </div>
@@ -873,8 +1029,24 @@ function InventoryPage({ ctx }) {
                 { value: 'all', label: '전체' },
               ]}
             />
+            <button className="btn btn--primary" onClick={() => setBulkOpen(true)}>
+              <Icon name="upload" size={14} /> 일괄 추가
+            </button>
+            <button className="btn btn--sm" onClick={() => excelInputRef.current?.click()} title="잉크 재고 조사표(.xlsx)를 읽어 선택한 날짜 컬럼 값을 오늘 재고로 입력">
+              <Icon name="image" size={11} /> 엑셀 불러오기
+            </button>
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={e => { handleExcelFile(e.target.files?.[0]); e.target.value = ''; }}
+            />
+            <button className="btn btn--sm" onClick={() => window.print()}>
+              <Icon name="download" size={11} /> 인쇄
+            </button>
             <button
-              className="btn btn--primary btn--sm"
+              className="btn btn--sm"
               onClick={createTodayCol}
               disabled={!canCreateToday}
               title={canCreateToday
@@ -897,7 +1069,7 @@ function InventoryPage({ ctx }) {
             <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>행 순서는 ↑↓ 버튼으로 조정</span>
           </div>
 
-          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+          <div className="tbl-wrap" style={{ maxHeight: 'calc(100vh - 195px)' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -934,7 +1106,7 @@ function InventoryPage({ ctx }) {
                   <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>2차 LOT</th>
                   <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>3차 LOT</th>
                   <th className="col-lot-extra" style={{ width: 130, background: BG.lotExtra, fontWeight: 700 }}>최초 LOT</th>
-                  <th className="no-print" style={{ width: 130, background: BG.num }}></th>
+                  <th className="no-print" style={{ width: 176, background: BG.num }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -959,6 +1131,7 @@ function InventoryPage({ ctx }) {
                     onRelabelInk={relabelInk}
                     onStartAddLot={startAddLot}
                     onMoveRow={moveRow}
+                    onPasteColumn={pasteStockColumn}
                     isLast={gi === visibleLots.length - 1}
                   />
                 ))}
@@ -984,7 +1157,7 @@ function InventoryPage({ ctx }) {
           <div className="tbl-footnote no-print">
             <span>행 <strong style={{ color: 'var(--ink-900)' }}>{visibleLots.length}</strong> · 오늘 입력 <strong style={{ color: 'var(--ink-900)' }}>{currentCount}</strong></span>
             <div style={{ flex: 1 }} />
-            <span>오늘 열에서 Enter → 아래 칸 이동 · 자동 저장</span>
+            <span>오늘 열에서 Enter → 아래 칸 이동 · 엑셀 열 복사 후 붙여넣기(Ctrl+V) → 아래로 자동 채움 · 자동 저장</span>
           </div>
         </Card>
       </div>
@@ -996,6 +1169,18 @@ function InventoryPage({ ctx }) {
           bulkResult={bulkResult}
           onAdd={handleBulkAdd}
           onClose={() => { setBulkOpen(false); setBulkResult(null); setBulkText(''); }}
+          onRegisterUnknown={(lotNo) => setAddInkFor({ lotNo, source: 'bulk' })}
+        />
+      )}
+
+      {addInkFor && (
+        <AddInkModal
+          lotNo={addInkFor.lotNo}
+          machineOptions={machineOptions}
+          dupCode={dupCode}
+          dupInk={dupInk}
+          onRegister={handleRegisterInk}
+          onClose={() => setAddInkFor(null)}
         />
       )}
 

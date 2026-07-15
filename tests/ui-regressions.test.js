@@ -163,13 +163,11 @@ test('review page shows source request image for verification', () => {
   assert.match(review, /showImage/);                       // 표시 토글
 });
 
-test('risk alerts are shortage-based; depletion removed from dashboard/bell/sidebar', () => {
+test('risk alerts are shortage-based; depletion removed from bell/sidebar', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.jsx'), 'utf8');
-  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
   assert.match(app, /buildInkPlanningAlerts/);          // 알림 소스는 유지
   assert.match(app, /riskInkCount/);
   assert.doesNotMatch(app, /inkDepletion/);             // 벨/사이드바 배선서 소진 제거
-  assert.doesNotMatch(dashboard, /잉크 소진 임박/);      // 대시보드 소진 카드 제거
 });
 
 test('weekly close is automatic on app load (manual nudge removed)', () => {
@@ -181,8 +179,6 @@ test('weekly close is automatic on app load (manual nudge removed)', () => {
   const autoCloseBlock = app.slice(app.indexOf('자동 주간 마감'), app.indexOf('// 초기 로드'));
   assert.match(autoCloseBlock, /dataRef\.current/);                 // red: 현재 로드 시점 snap 고정
   assert.doesNotMatch(autoCloseBlock, /return \(\) => clearTimeout/); // red: 현재 cleanup이 취소
-  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'dashboard.jsx'), 'utf8');
-  assert.doesNotMatch(dashboard, /마감하러 가기/);       // 자동화로 유도 배너 제거
 });
 
 test('injection wires typeOptions + id into ProductEditor path (F-01)', () => {

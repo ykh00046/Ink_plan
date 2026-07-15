@@ -578,79 +578,6 @@
     return buildInkPlanningAlerts(data, dates, today, threshold).depletion;
   }
 
-  // 전역 통합 대시보드 요약 모델(순수 합성). 기존 어댑터(lintMasters→buildMasterHealthBadge,
-  // buildInkShortageBadge)를 단일 모델로 묶는다. 새 임계값·계산을 발명하지 않으므로 각 페이지·
-  // 사이드바 배지·bell과 수치가 항상 일치한다. data===null 안전(모든 카운트 0, tone 'ok').
-  function buildDashboardSummary(data, dates, opts) {
-    opts = opts || {};
-    const countOf = (v) => Array.isArray(v) ? v.length
-      : (v && typeof v === 'object' ? Object.keys(v).length : 0);
-
-    // 1) 마스터 정합성 — lintMasters → buildMasterHealthBadge (전역 배지와 동일 경로)
-    // 진입 화면 절대 throw 금지 — lint 실패 시 정합성 카드만 '정상'으로 강등.
-    let lint = { summary: { total: 0, byCategory: {}, bySeverity: { error: 0, warn: 0, info: 0 } }, issues: [] };
-    try {
-      lint = lintMasters(data, opts.normalize ? { normalize: opts.normalize } : undefined);
-    } catch (e) { /* keep default */ }
-    const mh = buildMasterHealthBadge(lint.summary);
-    const master = {
-      errorCount:  mh.errorCount || 0,
-      notInMaster: mh.notInMaster || 0,
-      noInks:      mh.noInks || 0,
-      show:        !!mh.show,
-      tooltip:     mh.tooltip,
-      tone:        (mh.errorCount || 0) > 0 ? 'bad' : 'ok',
-    };
-
-    // 2) 재고 부족 임박 — buildInkShortageBadge (ink-plan 빨강 셀·bell과 동일 출처)
-    // 진입 화면이라 부분/이상 데이터에도 절대 throw 금지 → 실패 시 '정상'으로 graceful.
-    let alerts = {
-      shortage: { shortageCount: 0, items: [], show: false, tooltip: '재고 정상' },
-      depletion: { depletionCount: 0, urgentCount: 0, items: [], show: false, tooltip: '소진 임박 없음' },
-    };
-    if (data) {
-      try { alerts = buildInkPlanningAlerts(data, dates, opts.today, opts.depletionThreshold); } catch (e) { /* keep default */ }
-    }
-    const sb = alerts.shortage;
-    const shortage = {
-      count:   sb.shortageCount || 0,
-      items:   (sb.items || []).slice(0, 5), // 가장 부족한 상위 5
-      show:    !!sb.show,
-      tooltip: sb.tooltip,
-      tone:    (sb.shortageCount || 0) > 0 ? 'warn' : 'ok',
-    };
-    const db = alerts.depletion;
-    const depletion = {
-      count:       db.depletionCount || 0,
-      urgentCount: db.urgentCount || 0,
-      items:       (db.items || []).slice(0, 5),
-      show:        !!db.show,
-      tooltip:     db.tooltip,
-      tone:        (db.urgentCount || 0) > 0 ? 'bad' : ((db.depletionCount || 0) > 0 ? 'warn' : 'ok'),
-    };
-
-    // 3) 마스터 규모(참고용, 비경보) — 배열/객체 모두 안전 카운트
-    const d = data || {};
-    const masters = {
-      products:  countOf(d.products),
-      inks:      countOf(d.inkPlan),
-      chemicals: countOf(d.chemicals),
-    };
-
-    // 4) 이번 주 일정 — dates는 { 요일: 'M/D' } 객체(getWeekInfo) 또는 배열 모두 허용
-    let weekDates = [];
-    if (Array.isArray(dates)) {
-      weekDates = dates;
-    } else if (dates && typeof dates === 'object') {
-      weekDates = WEEKDAYS.map(d => dates[d]).filter(Boolean);
-    }
-    const todayDate = (dates && !Array.isArray(dates) && opts.today)
-      ? (dates[opts.today] || null) : null;
-    const week = { today: opts.today || null, todayDate, dates: weekDates, dayCount: weekDates.length };
-
-    return { master, shortage, depletion, masters, week };
-  }
-
   // 약품요청서 인쇄 메타 — 작성자 fallback·문서번호·요약·결재 roster를 한 곳에서 산출.
   // todayISO는 주입(순수 유지). 데이터 변경 없음(read-only 인쇄 메타).
   function buildChemicalRequestMeta(totals, rangeLabel, requester, todayISO) {
@@ -777,6 +704,26 @@
     return `${prefix}${mmdd}${String(seq).padStart(2, '0')}`;
   }
 
+  // LOT 번호가 잉크 이름과 정합한지 검증 — 순수 함수, 부수효과 없음.
+  // 반환: { ok, reason }
+  //   · 잉크명 비어있음(또는 공백)            → ok false, reason 'no-name'
+  //   · 잉크명에서 prefix 추출 불가(한글 등)   → ok false, reason 'no-prefix'
+  //   · LOT가 해당 prefix로 시작하지 않음      → ok false, reason 'prefix-mismatch'
+  //   · 그 외                                   → ok true, reason null
+  function validateInkForLot(lotNo, inkName) {
+    if (!String(inkName == null ? '' : inkName).trim()) {
+      return { ok: false, reason: 'no-name' };
+    }
+    const prefix = lotPrefix(inkName);
+    if (!prefix) {
+      return { ok: false, reason: 'no-prefix' };
+    }
+    if (!String(lotNo).toUpperCase().trim().startsWith(prefix)) {
+      return { ok: false, reason: 'prefix-mismatch' };
+    }
+    return { ok: true, reason: null };
+  }
+
   function initialInventoryLot(lots, inkName) {
     const ink = String(inkName || '');
     const inkLots = initialInventoryLots(lots, ink);
@@ -814,6 +761,21 @@
 
   function actualInventoryLot(lots, inkName, dateISO) {
     return actualInventoryLotForInitial(lots, initialInventoryLot(lots, inkName), dateISO);
+  }
+
+  // 재고 수량 세로 붙여넣기 파서 — 엑셀에서 복사한 열(줄바꿈=행 구분)을 행 순서 값으로 변환.
+  // 각 원소 { raw, num }: num은 숫자면 Number, 빈칸/비숫자면 null(해당 행은 건너뛰되 정렬 유지용으로 자리 보존).
+  // 한 줄에 탭이 있으면 첫 칸만 사용(가로 여러 열 붙여넣기 방어). 콤마(1,000)·공백 허용.
+  // 끝에 붙는 빈 줄(엑셀 복사 시 개행)은 제거해 실제 값 개수만 남긴다.
+  function parsePastedStockColumn(text) {
+    const lines = String(text == null ? '' : text).replace(/\r/g, '').split('\n');
+    while (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
+    return lines.map(line => {
+      const cell = String(line).split('\t')[0].trim();
+      if (cell === '') return { raw: '', num: null };
+      const n = Number(cell.replace(/,/g, ''));
+      return { raw: cell, num: Number.isFinite(n) ? n : null };
+    });
   }
 
   function relabelInventoryLot(inventory, initialLotId, dateISO, idFactory) {
@@ -914,6 +876,39 @@
     const norm = normalizeInkName(name);
     if (!norm) return false;
     return (master || []).some(m => normalizeInkName(m) === norm);
+  }
+
+  // 잉크를 마스터(machineAssignments + inkPlan)에 추가 — 순수 함수, 입력 미변경.
+  // pages/machines.jsx 의 registerInk 와 동일한 변환 규칙을 데이터 레이어에 둔 버전.
+  //   · machineAssignments: { ink, machine, code } 를 맨 앞에 prepend (배열 복제)
+  //   · inkPlan: 같은 정규화 이름이 없으면 { name, days: blank } 를 맨 앞에 prepend
+  // blank days 객체는 registerInk 와 동일한 WEEKDAYS-keyed per-day 구조.
+  function addInkToMaster(data, opts) {
+    const o = opts || {};
+    const name = String(o.name == null ? '' : o.name);
+    const machine = String(o.machine == null ? '' : o.machine);
+    const code = String(o.code == null ? '' : o.code);
+    const d = data || {};
+
+    const nextMachineAssignments = [
+      { ink: name, machine, code },
+      ...(d.machineAssignments || []),
+    ];
+
+    const normName = normalizeInkName(name);
+    const exists = (d.inkPlan || []).some(i => normalizeInkName(i.name) === normName);
+    const blank = Object.fromEntries(WEEKDAYS.map(d => [d, {
+      '현재고': null, '가용일수': null, '필요수량': d === '월' ? null : undefined, '제조량': null,
+    }]));
+    const nextInkPlan = exists
+      ? (d.inkPlan || [])
+      : [{ name, days: blank }, ...(d.inkPlan || [])];
+
+    return {
+      ...d,
+      machineAssignments: nextMachineAssignments,
+      inkPlan: nextInkPlan,
+    };
   }
 
   // ── CascadePicker 파생 순수 함수 (ui.jsx 위임, 동작 보존) ───────────────────
@@ -1641,32 +1636,6 @@
     return { sets, creates, unknowns };
   }
 
-  // 오늘 사출 라인업 — 오늘 요일에 주/야간 제품이 잡힌 호기만 추림 (대시보드 read-only 패널)
-  function buildTodayLineup(injection, todayKor) {
-    const rows = [];
-    if (!todayKor) return rows;
-    for (const floor of Object.keys(injection || {})) {
-      for (const m of injection[floor] || []) {
-        const cell = (m.schedule || {})[todayKor] || {};
-        const day = productCellName(cell.day).trim();
-        const night = productCellName(cell.night).trim();
-        if (!day && !night) continue;
-        const no = machineNoOf(m);
-        rows.push({
-          floor,
-          machineNo: no,
-          machine: String(m.machine || (no != null ? `${no}호기` : '')),
-          day,
-          night,
-        });
-      }
-    }
-    rows.sort((a, b) => a.floor === b.floor
-      ? (a.machineNo ?? 999) - (b.machineNo ?? 999)
-      : (a.floor < b.floor ? -1 : 1));
-    return rows;
-  }
-
   // ── OCR 결과 검증·grounding (검수 페이지·ocr-import 에서 사용) ─────────────────
 
   // OCR 파싱 결과를 마스터·사출계획과 대조해 구조적 이상을 찾는다 (결정적 검증).
@@ -1993,15 +1962,16 @@
     buildInkPlanningAlerts,
     buildInkShortageBadge,
     buildInkDepletionBadge,
-    buildDashboardSummary,
     lotPrefix,
     lotSequenceForDate,
     nextInventoryLotNo,
+    validateInkForLot,
     dateFromLotNo,
     initialInventoryLots,
     initialInventoryLot,
     actualInventoryLot,
     actualInventoryLotForInitial,
+    parsePastedStockColumn,
     relabelLotsForDate,
     relabelLotsForInitial,
     relabelInventoryLot,
@@ -2009,6 +1979,7 @@
     removeInventoryInk,
     buildInkMaster,
     isInkInMaster,
+    addInkToMaster,
     normalizeInkName,
     buildCascadeBrands,
     cascadeProductsInBrand,
@@ -2054,7 +2025,6 @@
     applyOcrToInjection,
     lintOcrResult,
     buildOcrGroundingHints,
-    buildTodayLineup,
     parseInventorySheetRows,
     buildInventoryImportPlan,
     // inventory
