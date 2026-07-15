@@ -16,13 +16,13 @@
 const INVENTORY_BG = {
   num:        'var(--ink-100)',
   ink:        null,
-  lotMain:    'oklch(0.97 0.02 200)',        // 최초 Lot — 매우 옅은 청록
-  lotMainHdr: 'oklch(0.94 0.04 200)',        // 최초 Lot 헤더
-  lotExtra:   'oklch(0.985 0.008 250)',      // 2차/3차 Lot — 거의 흰색
-  date:       'oklch(0.985 0.012 90)',       // 일자 — 거의 흰색에 살짝 노란
-  dateHdr:    'oklch(0.96 0.025 90)',        // 일자 헤더 — 옅은 노란
-  today:      'oklch(0.97 0.04 90)',         // 오늘 — 옅은 노란
-  todayHdr:   'oklch(0.92 0.07 90)',         // 오늘 헤더 — 노란
+  lotMain:    'oklch(0.985 0.008 200)',      // 최초 Lot — 매우 옅은 청록
+  lotMainHdr: 'oklch(0.965 0.018 200)',      // 최초 Lot 헤더
+  lotExtra:   'oklch(0.99 0.004 250)',       // 2차/3차 Lot — 거의 흰색
+  date:       'oklch(0.99 0.006 90)',        // 일자 — 거의 흰색에 살짝 노란
+  dateHdr:    'oklch(0.975 0.012 90)',       // 일자 헤더 — 옅은 노란
+  today:      'oklch(0.98 0.025 90)',        // 오늘 — 옅은 노란
+  todayHdr:   'oklch(0.93 0.05 90)',         // 오늘 헤더 — 노란
   create:     'oklch(0.97 0.03 150)',        // 이어서 생성 컬럼
 };
 
@@ -158,11 +158,13 @@ function InventoryRow({
           {actualLot ? actualLot.lotNo : '-'}
         </td>
         <td
-          className={`inv-life inv-life--${life.tone}`}
+          className="inv-life"
           style={{ background: BG.lotMain }}
           title={life.title}
         >
-          {life.text}
+          <span className={`inv-life-pill inv-life-pill--${life.tone}`}>
+            {life.text}
+          </span>
         </td>
         {/* 일자 셀들 */}
         {visibleDates.map(dateISO => {
@@ -280,35 +282,31 @@ function InventoryRow({
         <td className="no-print" style={{ textAlign: 'center', background: BG.num, borderLeft: '2px solid var(--ink-200)' }}>
           <div style={{ display: 'inline-flex', gap: 4, justifyContent: 'center', flexWrap: 'nowrap' }}>
             <button
-              className="btn btn--sm"
+              className="inv-act"
               onClick={() => onRelabelInk(initialLot)}
               title={`${initialLot.lotNo} 를 당일 LOT로 재라벨`}
-              style={{ padding: '2px 8px', fontSize: 11 }}
               disabled={relabels.length >= 2 || !initialLot}
             >
               재라벨
             </button>
             <button
-              className="btn btn--sm btn--danger"
+              className="inv-act inv-act--danger"
               onClick={() => onDeleteLot(initialLot)}
               title={`${initialLot.lotNo} 재고 조사 행 삭제`}
-              style={{ padding: '2px 8px', fontSize: 11 }}
             >
               삭제
             </button>
             <button
-              className="btn btn--sm"
+              className="inv-act"
               onClick={() => onMoveRow(initialLot.id, -1)}
               disabled={gi === 0}
               title="위로 이동"
-              style={{ padding: '2px 6px', fontSize: 11 }}
             >↑</button>
             <button
-              className="btn btn--sm"
+              className="inv-act"
               onClick={() => onMoveRow(initialLot.id, 1)}
               disabled={isLast}
               title="아래로 이동"
-              style={{ padding: '2px 6px', fontSize: 11 }}
             >↓</button>
           </div>
         </td>

@@ -221,7 +221,7 @@ function AutoAssignModal({ today, dates, candidates, onApply, onClose }) {
         </>
       }
     >
-      <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)', padding: 10, background: 'var(--brand-50)', borderRadius: 8 }}>
+      <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-700)', padding: 10, background: 'var(--ink-50)', borderRadius: 8 }}>
         <Icon name="sparkle" size={12} /> 당일 제조량이 비어있고, <strong>오늘 필요수량이 음수(부족)</strong>인 정식 잉크의 빈 제조량 셀에 <strong>|필요수량|</strong> 을 채웁니다. 양산대응 잠금 셀은 제외.
       </div>
       {candidates.length === 0 ? (
@@ -459,8 +459,8 @@ function InkPlanPage({ ctx }) {
           <div className="legend-row no-print">
             <span className="legend-row__title">색상 안내</span>
             <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'oklch(0.95 0.04 200)', border: '1px solid oklch(0.78 0.08 200)' }} /> 재고 조사에서 자동 입력</span>
-            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'var(--brand-50)', border: '1px solid var(--brand-500)' }} /> 오늘 열</span>
-            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'var(--brand-50)', border: '1px solid var(--brand-400)' }} /> 제조량 입력됨</span>
+            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'oklch(0.96 0.06 245)', border: '1px solid oklch(0.78 0.12 245)' }} /> 오늘 열</span>
+            <span className="legend-row__item"><span className="legend-row__sw" style={{ background: 'oklch(0.96 0.06 245)', border: '1px solid oklch(0.70 0.10 245)' }} /> 제조량 입력됨</span>
             <span className="legend-row__item"><span className="legend-row__dot" style={{ background: 'var(--bad-500)' }} /> <strong style={{ color: 'var(--bad-600)', fontWeight: 600 }}>긴급</strong> — 가용 1일 이하·부족</span>
             <span className="legend-row__item"><span className="legend-row__dot" style={{ background: 'var(--warn-500)' }} /> <strong style={{ color: 'var(--warn-600)', fontWeight: 600 }}>주의</strong> — 가용 3일 이하</span>
           </div>
@@ -675,8 +675,8 @@ function InkMachineReadonly({ machine }) {
   }
   return (
     <span
-      className="tag"
-      style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'help' }}
+      className="inkplan-machine-tag"
+      style={{ cursor: 'help' }}
       title="호기는 잉크 추가 및 관리 페이지에서만 변경할 수 있습니다"
     >
       {machine}

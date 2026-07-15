@@ -1294,26 +1294,48 @@ button { background: none; border: none; cursor: pointer; }
   font-size: 12px;
   font-weight: 600;
   text-align: center;
-  border-right: 2px solid oklch(0.82 0.06 200);
+  border-right: 1px solid var(--ink-200);
 }
 .tbl td.inv-life {
   text-align: center;
   font-size: 11px;
-  font-weight: 700;
   white-space: nowrap;
-  border-right: 2px solid oklch(0.82 0.06 200);
+  border-right: 1px solid var(--ink-200);
 }
-.inv-life--ok { color: var(--ok-600); }
-.inv-life--warn { color: var(--warn-600); }
-.inv-life--relabel {
-  color: var(--bad-600);
-  background: var(--warn-50, oklch(0.97 0.04 70)) !important;
+/* 유효기간 pill-badge — 톤별 부드러운 알약 */
+.inv-life-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.6;
 }
-.inv-life--expired {
-  color: white;
-  background: var(--bad-500) !important;
+.inv-life-pill--ok { background: var(--ok-50, oklch(0.96 0.03 150)); color: var(--ok-600); }
+.inv-life-pill--warn { background: var(--warn-50, oklch(0.97 0.04 70)); color: var(--warn-600); }
+.inv-life-pill--relabel {
+  background: var(--warn-50, oklch(0.97 0.04 70));
+  color: var(--warn-600);
+  border: 1px solid var(--warn-300, oklch(0.86 0.09 75));
 }
-.inv-life--empty { color: var(--ink-400); }
+.inv-life-pill--expired { background: oklch(0.95 0.03 25); color: var(--bad-600); }
+.inv-life-pill--empty { background: var(--ink-100); color: var(--ink-500); }
+
+/* 재고 조사 행 액션 — 고스트 텍스트 버튼 */
+.inv-act {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-500);
+  cursor: pointer;
+}
+.inv-act:hover { background: var(--ink-100); color: var(--ink-800); }
+.inv-act--danger:hover { background: oklch(0.95 0.03 25); color: var(--bad-600); }
+.inv-act:disabled { opacity: .35; cursor: default; }
 .tbl td.inv-lot-extra {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
@@ -1628,6 +1650,17 @@ button { background: none; border: none; cursor: pointer; }
   font-weight: 500;
   color: var(--brand-700);
   padding: 4px 8px;
+}
+/* 호기 중성 회색 알약 (파란 강조 반복 제거) */
+.inkplan-machine-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--ink-100);
+  color: var(--ink-600);
 }
 .inkplan-tbl th.sticky-col-2 {
   position: sticky;
