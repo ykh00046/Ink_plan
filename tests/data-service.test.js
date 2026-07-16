@@ -311,6 +311,26 @@ test('lintMasters: 사출계획에 있으나 제품 마스터에 없으면 produ
   assert.match(missing[0].detail, /3층.*10호기.*월.*야/);
 });
 
+test('lintMasters: STOP/정지 등 설비 정지 표기는 제품 아님 — TEST와 동일 스킵 (F: STOP 오탐 회귀)', () => {
+  // 현장 요청서의 정지 표기가 셀에 들어오면 OCR(matchOcrRow)은 스킵하는데 lint만 제품으로
+  // 취급해 '사출계획에 있으나 제품 마스터에 없음'이 매일 재발했다. STOP_TOKENS 단일 기준 공유.
+  const data = {
+    products: [{ name: 'KNOWN', inks: ['INK1'] }],
+    machineAssignments: [{ ink: 'INK1', machine: '10호기', code: 'C1' }],
+    injection: {
+      '3층': [{ machine: '13호기', schedule: {
+        화: { day: 'STOP', night: '정지' },
+        수: { day: '호기 정지', night: 'stop' },
+        목: { day: 'TEST', night: 'STOPPER RED' },   // STOPPER RED는 실제 미등록 제품 → 잡혀야 함
+      } }],
+    },
+  };
+  const r = DataService.lintMasters(data);
+  const missing = r.issues.filter(i => i.category === 'product-not-in-master');
+  assert.equal(missing.length, 1);                 // STOP/정지/호기정지/stop/TEST 전부 스킵
+  assert.equal(missing[0].target, 'STOPPER RED');  // 부분 문자열은 정지 아님(정확 일치만)
+});
+
 test('lintMasters: {name,id} 객체 셀 — 등록 제품은 이슈 0건, 크래시 없음 (id-셀 회귀)', () => {
   // 수동 셀 편집·OCR 머지가 저장하는 {name,id} 객체 셀. 이전엔 객체가 그대로 비교돼
   // 전부 product-not-in-master 오탐 + 정렬에서 target.localeCompare TypeError(앱 백지).

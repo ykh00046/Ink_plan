@@ -290,6 +290,8 @@
             // TEST 런 셀은 제품이 아님 — 정합성 점검 제외 (검수 isTest 판정과 동일 기준)
             const normTest = normalizeProductName(value);
             if (normTest === 'TEST' || normTest === '테스트') continue;
+            // 설비 정지 표기(STOP/정지/멈춤 등)도 제품 아님 — OCR 스킵(matchOcrRow의 STOP_TOKENS)과 동일 기준
+            if (STOP_TOKENS.has(normTest)) continue;
             const cellId = productCellId(raw);
             if (cellId && productIds.has(cellId)) continue;
             if (productInks.has(value)) continue;
