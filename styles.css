@@ -1407,6 +1407,20 @@ button { background: none; border: none; cursor: pointer; }
 .inv-stock__display--zero { color: var(--bad-600); font-weight: 600; }
 .inv-stock__display--has { color: var(--ink-800); font-weight: 600; }
 
+/* 드래그 놓은 지점 옆 일괄삭제 팝오버 */
+.inv-select-popover {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--ink-300);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .14);
+}
+
 /* 드래그 선택된 행 — hover 규칙보다 뒤에 두어 우선 적용 */
 .tbl tbody tr.inv-row--selected td { background: oklch(0.94 0.045 245) !important; }
 .tbl tbody tr.inv-row--selected td.row-num { background: var(--brand-500) !important; color: white; }
