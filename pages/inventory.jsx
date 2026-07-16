@@ -788,36 +788,51 @@ function InventoryPage({ ctx }) {
   // ── 엑셀 재고 조사표 가져오기 ──
   // 파싱(SheetJS)·계획 수립(DataService 순수 함수) 후 미리보기 모달 → 오늘 재고로 적용
   const excelInputRef = useRef(null);
-  const [excelImport, setExcelImport] = useState(null); // { parsed, label, fileName } | null
+  const [excelImport, setExcelImport] = useState(null); // { sheets, sheetName, label, fileName } | null
 
   const handleExcelFile = async (file) => {
     if (!file) return;
     if (typeof XLSX === 'undefined') { notify('엑셀 파서(xlsx.full.min.js)가 로드되지 않았습니다'); return; }
     try {
       const wb = XLSX.read(await file.arrayBuffer());
-      // 차트시트 등을 건너뛰고 '잉크명' 헤더가 있는 첫 시트 사용
-      let parsed = null;
-      for (const name of wb.SheetNames) {
-        const ws = wb.Sheets[name];
-        if (!ws || !ws['!ref']) continue;
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
-        const p = DataService.parseInventorySheetRows(rows);
-        if (!p.error && p.rows.length) { parsed = p; break; }
-      }
-      if (!parsed) { notify('재고 조사표 형식(잉크명/Lot No. 헤더)을 찾지 못했습니다'); return; }
-      // 기본 컬럼 = 값이 있는 가장 최근(오른쪽) 날짜 컬럼
-      const withValues = parsed.dateCols.filter(dc => parsed.rows.some(r => r.values[dc.label] != null));
-      const defaultLabel = withValues.length ? withValues[withValues.length - 1].label : (parsed.dateCols[0]?.label || '');
-      setExcelImport({ parsed, label: defaultLabel, fileName: file.name });
+      // 모든 시트를 파싱해 후보로 모은 뒤, 날짜 컬럼이 가장 최신인 시트를 기본 선택.
+      // 주차/월별 탭 통합문서에서 가장 앞쪽 옛 시트를 잘못 집는 사고 방지.
+      const all = wb.SheetNames.map(name => {
+        let parsed = null;
+        try {
+          const ws = wb.Sheets[name];
+          if (ws && ws['!ref']) {
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+            const p = DataService.parseInventorySheetRows(rows);
+            if (!p.error && p.rows.length) parsed = p;
+          }
+        } catch (_) { parsed = null; }
+        return { name, parsed };
+      });
+      const usable = all.filter(c => c.parsed);
+      if (!usable.length) { notify('재고 조사표 형식(잉크명/Lot No. 헤더)을 찾지 못했습니다'); return; }
+      const pickedIdx = DataService.pickInventorySheetIndex(usable.map(u => u.parsed));
+      const chosen = usable[pickedIdx >= 0 ? pickedIdx : 0];
+      const defaultLabel = defaultLabelFor(chosen.parsed);
+      setExcelImport({ sheets: usable, sheetName: chosen.name, label: defaultLabel, fileName: file.name });
     } catch (e) {
       console.error('엑셀 파싱 실패:', e);
       notify(`엑셀 파싱 실패: ${e.message || e}`);
     }
   };
 
+  // 기본 컬럼 = 값이 있는 가장 최근(오른쪽) 날짜 컬럼
+  const defaultLabelFor = (parsed) => {
+    if (!parsed) return '';
+    const withValues = (parsed.dateCols || []).filter(dc => (parsed.rows || []).some(r => r.values[dc.label] != null));
+    return withValues.length ? withValues[withValues.length - 1].label : ((parsed.dateCols && parsed.dateCols[0]?.label) || '');
+  };
+
+  const selectedParsed = excelImport ? (excelImport.sheets.find(s => s.name === excelImport.sheetName)?.parsed || null) : null;
+
   const excelPlan = useMemo(
-    () => excelImport ? DataService.buildInventoryImportPlan(excelImport.parsed, excelImport.label, data, today) : null,
-    [excelImport, data, today]
+    () => (excelImport && selectedParsed) ? DataService.buildInventoryImportPlan(selectedParsed, excelImport.label, data, today) : null,
+    [excelImport, selectedParsed, data, today]
   );
 
   const applyExcelImport = () => {
@@ -1327,6 +1342,27 @@ function InventoryPage({ ctx }) {
             </>
           }
         >
+          {excelImport.sheets.length > 1 && (
+            <div className="field" style={{ marginBottom: 10 }}>
+              <label className="field__label">시트</label>
+              <select
+                className="input select"
+                value={excelImport.sheetName}
+                onChange={e => {
+                  const next = excelImport.sheets.find(s => s.name === e.target.value);
+                  const parsed = next ? next.parsed : null;
+                  setExcelImport({ ...excelImport, sheetName: e.target.value, label: defaultLabelFor(parsed) });
+                }}
+                style={{ width: 220 }}
+              >
+                {excelImport.sheets.map(s => (
+                  <option key={s.name} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+              <div className="field__hint">주차/월별 탭이 여러 개면 가장 최근 날짜 시트가 기본 선택됩니다.</div>
+            </div>
+          )}
+
           <div className="field" style={{ marginBottom: 10 }}>
             <label className="field__label">가져올 날짜 컬럼</label>
             <select
@@ -1335,7 +1371,7 @@ function InventoryPage({ ctx }) {
               onChange={e => setExcelImport({ ...excelImport, label: e.target.value })}
               style={{ width: 220 }}
             >
-              {excelImport.parsed.dateCols.map(dc => (
+              {(selectedParsed && selectedParsed.dateCols || []).map(dc => (
                 <option key={`${dc.col}`} value={dc.label}>{dc.label} ({dc.day})</option>
               ))}
             </select>

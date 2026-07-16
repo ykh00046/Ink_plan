@@ -1605,6 +1605,22 @@
     return { dateCols, rows: out };
   }
 
+  // 시트 자동 선택 — 날짜 컬럼(M/D 라벨)이 가장 최신인 시트 index.
+  // 주차/월별 탭 통합문서에서 옛 시트를 집는 사고 방지.
+  function pickInventorySheetIndex(parsedList) {
+    let best = -1, bestKey = -1;
+    (parsedList || []).forEach((p, i) => {
+      if (!p || p.error || !(p.rows || []).length) return;
+      let key = 0;
+      for (const dc of (p.dateCols || [])) {
+        const m = /^(\d{1,2})\/(\d{1,2})/.exec(String(dc.label || ''));
+        if (m) key = Math.max(key, Number(m[1]) * 100 + Number(m[2]));
+      }
+      if (key > bestKey) { bestKey = key; best = i; }
+    });
+    return best;
+  }
+
   // 선택한 날짜 라벨의 값을 '오늘 재고'로 넣는 실행 계획 (적용은 페이지에서).
   //  · 기존 lot 보유 잉크 → sets (오늘 기준 actual lot 에 값)
   //  · 잉크 마스터엔 있으나 lot 없음 → creates (lot 신규 등록 + 값)
@@ -2041,6 +2057,7 @@
     lintOcrResult,
     buildOcrGroundingHints,
     parseInventorySheetRows,
+    pickInventorySheetIndex,
     buildInventoryImportPlan,
     // inventory
     inkLifeInfo,
