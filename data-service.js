@@ -836,6 +836,11 @@
     return next;
   }
 
+  // 여러 lot 일괄 삭제 — removeInventoryLot 을 순차 적용 (재라벨 자식·일별 재고 동반 삭제 규칙 재사용)
+  function removeInventoryLots(inventory, lotIds) {
+    return (lotIds || []).reduce((inv, id) => removeInventoryLot(inv, id), inventory || { lots: [], daily: {} });
+  }
+
   function removeInventoryInk(inventory, inkName) {
     const inv = inventory || { lots: [], daily: {} };
     const ids = new Set((inv.lots || []).filter(l => l.ink === inkName).map(l => l.id));
@@ -1985,6 +1990,7 @@
     relabelLotsForInitial,
     relabelInventoryLot,
     removeInventoryLot,
+    removeInventoryLots,
     removeInventoryInk,
     buildInkMaster,
     isInkInMaster,

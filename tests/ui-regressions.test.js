@@ -78,6 +78,30 @@ test('removes a lot and all stock entries for that lot', () => {
   });
 });
 
+test('removes multiple lots at once (bulk)', () => {
+  const inv = {
+    lots: [
+      { id: 'L1', ink: 'A', lotNo: 'A051301', registeredDate: '2026-05-13' },
+      { id: 'L2', ink: 'A', lotNo: 'A051302', registeredDate: '2026-05-13' },
+      { id: 'L3', ink: 'B', lotNo: 'B051301', registeredDate: '2026-05-13' },
+    ],
+    daily: {
+      '2026-05-13': { L1: 3, L2: 4, L3: 9 },
+      '2026-05-14': { L1: 2, L3: 8 },
+    },
+  };
+
+  assert.deepEqual(DataService.removeInventoryLots(inv, ['L1', 'L2']), {
+    lots: [
+      { id: 'L3', ink: 'B', lotNo: 'B051301', registeredDate: '2026-05-13' },
+    ],
+    daily: {
+      '2026-05-13': { L3: 9 },
+      '2026-05-14': { L3: 8 },
+    },
+  });
+});
+
 test('removes all inventory lots and stock entries for an ink', () => {
   const inv = {
     lots: [

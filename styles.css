@@ -1407,6 +1407,10 @@ button { background: none; border: none; cursor: pointer; }
 .inv-stock__display--zero { color: var(--bad-600); font-weight: 600; }
 .inv-stock__display--has { color: var(--ink-800); font-weight: 600; }
 
+/* 드래그 선택된 행 — hover 규칙보다 뒤에 두어 우선 적용 */
+.tbl tbody tr.inv-row--selected td { background: oklch(0.94 0.045 245) !important; }
+.tbl tbody tr.inv-row--selected td.row-num { background: var(--brand-500) !important; color: white; }
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--ink-50); }

@@ -130,7 +130,7 @@ function InventoryRow({
   initialLot, gi, inv, currentDate, today, visibleDates, isCurrent,
   addingFor, addingLotNo, addingRef, setAddingLotNo, onConfirmAddLot, onCancelAddLot,
   onSetStock, onDeleteLot, onRelabelInk, onStartAddLot, onMoveRow, onPasteColumn,
-  isLast,
+  isLast, selected, onRowNumMouseDown, onRowNumMouseEnter,
 }) {
   const BG = INVENTORY_BG;
   const relabels = DataService.relabelLotsForInitial(inv.lots, initialLot);
@@ -146,8 +146,14 @@ function InventoryRow({
 
   return (
     <React.Fragment>
-      <tr style={{ height: 30, background: rowBg }}>
-        <td className="row-num" style={{ background: BG.num }}>{gi + 1}</td>
+      <tr className={selected ? 'inv-row--selected' : ''} style={{ height: 30, background: rowBg }}>
+        <td
+          className="row-num"
+          style={{ background: BG.num, cursor: 'pointer', userSelect: 'none' }}
+          onMouseDown={e => onRowNumMouseDown(initialLot.id, e)}
+          onMouseEnter={() => onRowNumMouseEnter(initialLot.id)}
+          title="클릭/드래그로 행 선택"
+        >{gi + 1}</td>
         <td className="inv-ink ink-name">{initialLot.ink}</td>
         {/* 실제 LOT = 3차 > 2차 > 최초 */}
         <td
@@ -580,6 +586,9 @@ function InventoryPage({ ctx }) {
   const newLotRef = useRef(null);
   const addingRef = useRef(null);
   const autoCreatedTodayRef = useRef(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const dragAnchorRef = useRef(null);
+  const draggingRef = useRef(false);
 
   // ── inventory 초기화 ──
   useEffect(() => {
@@ -590,6 +599,18 @@ function InventoryPage({ ctx }) {
 
   // ── 인쇄 스타일 ──
   useInventoryPrintStyle();
+
+  // 번호(#) 칸 드래그로 범위 선택 — 입력칸·버튼과 충돌하지 않는 유일한 안전 핸들.
+  useEffect(() => {
+    const onMouseUp = () => { draggingRef.current = false; };
+    const onKeyDown = (e) => { if (e.key === 'Escape') setSelectedIds(new Set()); };
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   const inv = data.inventory || { lots: [], daily: {} };
   const inkNames = useMemo(() => (data.inkPlan || []).map(i => i.name), [data.inkPlan]);
@@ -694,6 +715,28 @@ function InventoryPage({ ctx }) {
     const next = [...current];
     [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
     setData({ ...data, inventory: { ...inv, order: next } });
+  };
+
+  // ── 드래그 범위 선택 핸들러 ──
+  const rowIds = visibleLots.map(l => l.id);
+  const selectRange = (fromId, toId) => {
+    const a = rowIds.indexOf(fromId), b = rowIds.indexOf(toId);
+    if (a < 0 || b < 0) return;
+    const [s, e2] = a <= b ? [a, b] : [b, a];
+    setSelectedIds(new Set(rowIds.slice(s, e2 + 1)));
+  };
+  const onRowNumMouseDown = (lotId, e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    dragAnchorRef.current = lotId;
+    setSelectedIds(prev => {
+      if (prev.size === 1 && prev.has(lotId)) return new Set();
+      const next = new Set([lotId]);
+      return next;
+    });
+  };
+  const onRowNumMouseEnter = (lotId) => {
+    if (draggingRef.current && dragAnchorRef.current) selectRange(dragAnchorRef.current, lotId);
   };
 
   // ── 엑셀 재고 조사표 가져오기 ──
@@ -970,6 +1013,15 @@ function InventoryPage({ ctx }) {
     notify(`${lot.ink} · ${lot.lotNo} 삭제됨`);
   };
 
+  const bulkDelete = () => {
+    const n = selectedIds.size;
+    if (n === 0) return;
+    if (!confirm(n + '개 행(잉크 재고)을 삭제할까요? 입력된 재고와 재라벨 LOT도 함께 삭제됩니다.')) return;
+    setData({ ...data, inventory: DataService.removeInventoryLots(inv, [...selectedIds]) });
+    setSelectedIds(new Set());
+    notify(n + '개 행 일괄 삭제됨');
+  };
+
   const deleteInk = (ink) => {
     if (!confirm(`${ink} 재고 조사 행을 삭제할까요? 최초/재라벨 LOT와 입력된 재고가 모두 삭제됩니다.`)) return;
     setData({ ...data, inventory: DataService.removeInventoryInk(inv, ink) });
@@ -1056,6 +1108,10 @@ function InventoryPage({ ctx }) {
                 ? ` 이어서 생성 (${invFmtDate(today)})`
                 : ` ${invFmtDate(today)} 생성됨`}
             </button>
+            {selectedIds.size > 0 && (<>
+              <button className="btn btn--sm btn--danger" onClick={bulkDelete}>선택 {selectedIds.size}건 삭제</button>
+              <button className="btn btn--sm" onClick={() => setSelectedIds(new Set())}>선택 해제 (Esc)</button>
+            </>)}
             <div className="spacer" />
             <input
               className="input input--search"
@@ -1131,6 +1187,9 @@ function InventoryPage({ ctx }) {
                     onMoveRow={moveRow}
                     onPasteColumn={pasteStockColumn}
                     isLast={gi === visibleLots.length - 1}
+                    selected={selectedIds.has(initialLot.id)}
+                    onRowNumMouseDown={onRowNumMouseDown}
+                    onRowNumMouseEnter={onRowNumMouseEnter}
                   />
                 ))}
 
@@ -1155,7 +1214,7 @@ function InventoryPage({ ctx }) {
           <div className="tbl-footnote no-print">
             <span>행 <strong style={{ color: 'var(--ink-900)' }}>{visibleLots.length}</strong> · 오늘 입력 <strong style={{ color: 'var(--ink-900)' }}>{currentCount}</strong></span>
             <div style={{ flex: 1 }} />
-            <span>오늘 열에서 Enter → 아래 칸 이동 · 엑셀 열 복사 후 붙여넣기(Ctrl+V) → 아래로 자동 채움 · 자동 저장</span>
+            <span>오늘 열에서 Enter → 아래 칸 이동 · 엑셀 열 복사 후 붙여넣기(Ctrl+V) → 아래로 자동 채움 · 자동 저장 · 번호 칸 드래그로 여러 행 선택 → 일괄 삭제</span>
           </div>
         </Card>
       </div>
