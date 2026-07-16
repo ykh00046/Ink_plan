@@ -589,6 +589,33 @@ function InventoryPage({ ctx }) {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const dragAnchorRef = useRef(null);
   const draggingRef = useRef(false);
+  // 드래그를 놓은 지점 옆에 뜨는 일괄삭제 팝오버 위치 ({x,y} | null)
+  const [popoverPos, setPopoverPos] = useState(null);
+  const selectedIdsRef = useRef(selectedIds);   // mount-once mouseup 리스너에서 최신 선택 참조용
+  selectedIdsRef.current = selectedIds;
+
+  // ── 1단계 실행취소(Ctrl+Z) — 매 사용자 mutation 직전 현재 inv 스냅샷 ──
+  const invUndoStack = useRef([]);
+  const [undoCount, setUndoCount] = useState(0);
+  const lastEditKeyRef = useRef(null);
+  // 같은 칸 연속 타이핑은 1건으로 합침 — key가 직전과 같으면 스냅샷 생략
+  const pushUndo = (key) => {
+    if (key && key === lastEditKeyRef.current) return;
+    lastEditKeyRef.current = key || null;
+    invUndoStack.current.push(inv);
+    if (invUndoStack.current.length > 50) invUndoStack.current.shift();
+    setUndoCount(invUndoStack.current.length);
+  };
+  const undo = () => {
+    const prev = invUndoStack.current.pop();
+    if (!prev) return;
+    setUndoCount(invUndoStack.current.length);
+    lastEditKeyRef.current = null;
+    setData({ ...data, inventory: prev });
+    notify('마지막 변경 되돌림 (Ctrl+Z)');
+  };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
 
   // ── inventory 초기화 ──
   useEffect(() => {
@@ -602,8 +629,26 @@ function InventoryPage({ ctx }) {
 
   // 번호(#) 칸 드래그로 범위 선택 — 입력칸·버튼과 충돌하지 않는 유일한 안전 핸들.
   useEffect(() => {
-    const onMouseUp = () => { draggingRef.current = false; };
-    const onKeyDown = (e) => { if (e.key === 'Escape') setSelectedIds(new Set()); };
+    const onMouseUp = (e) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      // 선택을 만든 채 놓으면 마우스 바로 옆에 [선택 N건 삭제] 팝오버 (우측 끝은 안으로 클램프)
+      if (selectedIdsRef.current.size > 0) {
+        setPopoverPos({
+          x: Math.min(e.clientX + 12, window.innerWidth - 230),
+          y: Math.max(8, e.clientY - 14),
+        });
+      } else {
+        setPopoverPos(null);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { setSelectedIds(new Set()); setPopoverPos(null); }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoRef.current();
+      }
+    };
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('keydown', onKeyDown);
     return () => {
@@ -714,6 +759,7 @@ function InventoryPage({ ctx }) {
     if (idx < 0 || nextIdx < 0 || nextIdx >= current.length) return;
     const next = [...current];
     [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    pushUndo(null);
     setData({ ...data, inventory: { ...inv, order: next } });
   };
 
@@ -790,6 +836,7 @@ function InventoryPage({ ctx }) {
       dayMap[lot.id] = c.value;
     }
     nextInv.daily[today] = dayMap;
+    pushUndo(null);
     setData({ ...data, inventory: nextInv });
     notify(`엑셀 가져오기 완료 — 입력 ${excelPlan.sets.length}건 · 신규 lot ${excelPlan.creates.length}건${excelPlan.unknowns.length ? ` · 제외 ${excelPlan.unknowns.length}건` : ''}`);
     setExcelImport(null);
@@ -831,6 +878,7 @@ function InventoryPage({ ctx }) {
       else if (result.reason === 'dup') notify(`Lot '${result.lotNo}' 는 이미 등록되어 있습니다`);
       return;
     }
+    pushUndo(null);
     const nextInv = { ...inv, lots: [...inv.lots, result.lot] };
     nextInv.order = appendOrderForNewInitial(nextInv, result.lot);
     setData({ ...data, inventory: nextInv });
@@ -935,6 +983,7 @@ function InventoryPage({ ctx }) {
       role: 'relabel',
       parentId: initialLot.id,
     };
+    pushUndo(null);
     setData({ ...data, inventory: { ...inv, lots: [...inv.lots, lot] } });
     notify(`${initialLot.lotNo} 재라벨 등록: ${lot.lotNo}`);
     cancelAddLot();
@@ -962,13 +1011,14 @@ function InventoryPage({ ctx }) {
       }
       else failed.push({ lotNo: ln, reason: r.reason });
     }
-    if (added.length > 0) setData({ ...data, inventory: working });
+    if (added.length > 0) { pushUndo(null); setData({ ...data, inventory: working }); }
     setBulkResult({ added, failed });
     setBulkText('');
   };
 
   // ── 재고 입력 ──
   const setStock = (lotId, dateISO, value) => {
+    pushUndo('stock:' + lotId + ':' + dateISO);
     const newDaily = { ...inv.daily };
     if (value === '' || value === null) {
       if (newDaily[dateISO]) {
@@ -990,6 +1040,7 @@ function InventoryPage({ ctx }) {
     if (!currentDate) return;
     const parsed = DataService.parsePastedStockColumn(text);
     if (parsed.length === 0) return;
+    pushUndo(null);
     const dayMap = { ...(inv.daily[currentDate] || {}) };
     let written = 0, skipped = 0;
     for (let i = 0; i < parsed.length; i++) {
@@ -1009,6 +1060,7 @@ function InventoryPage({ ctx }) {
   const deleteLot = (lot) => {
     if (!lot) return;
     if (!confirm(`${lot.ink} · ${lot.lotNo} 를 삭제할까요? 입력된 재고도 함께 삭제됩니다.`)) return;
+    pushUndo(null);
     setData({ ...data, inventory: DataService.removeInventoryLot(inv, lot.id) });
     notify(`${lot.ink} · ${lot.lotNo} 삭제됨`);
   };
@@ -1017,13 +1069,17 @@ function InventoryPage({ ctx }) {
     const n = selectedIds.size;
     if (n === 0) return;
     if (!confirm(n + '개 행(잉크 재고)을 삭제할까요? 입력된 재고와 재라벨 LOT도 함께 삭제됩니다.')) return;
+    pushUndo(null);
     setData({ ...data, inventory: DataService.removeInventoryLots(inv, [...selectedIds]) });
     setSelectedIds(new Set());
+    setPopoverPos(null);
     notify(n + '개 행 일괄 삭제됨');
   };
+  const clearSelection = () => { setSelectedIds(new Set()); setPopoverPos(null); };
 
   const deleteInk = (ink) => {
     if (!confirm(`${ink} 재고 조사 행을 삭제할까요? 최초/재라벨 LOT와 입력된 재고가 모두 삭제됩니다.`)) return;
+    pushUndo(null);
     setData({ ...data, inventory: DataService.removeInventoryInk(inv, ink) });
     notify(`${ink} 삭제됨`);
   };
@@ -1037,6 +1093,7 @@ function InventoryPage({ ctx }) {
     const nextInv = DataService.relabelInventoryLot(inv, initialLot.id, today);
     if (nextInv === inv) return;
     const created = nextInv.lots[nextInv.lots.length - 1];
+    pushUndo(null);
     setData({ ...data, inventory: nextInv });
     notify(`${initialLot.lotNo} 재라벨: ${created.lotNo}`);
   };
@@ -1045,6 +1102,7 @@ function InventoryPage({ ctx }) {
   const canCreateToday = !inv.daily[today];
   const createTodayCol = () => {
     if (!canCreateToday) return;
+    pushUndo(null);
     setData({ ...data, inventory: { ...inv, daily: { ...inv.daily, [today]: {} } } });
     notify(`${invFmtDate(today)} (${invDayKor(today)}) 일자 생성됨`);
   };
@@ -1110,8 +1168,9 @@ function InventoryPage({ ctx }) {
             </button>
             {selectedIds.size > 0 && (<>
               <button className="btn btn--sm btn--danger" onClick={bulkDelete}>선택 {selectedIds.size}건 삭제</button>
-              <button className="btn btn--sm" onClick={() => setSelectedIds(new Set())}>선택 해제 (Esc)</button>
+              <button className="btn btn--sm" onClick={clearSelection}>선택 해제 (Esc)</button>
             </>)}
+            <button className="btn btn--sm" onClick={undo} disabled={undoCount === 0} title="마지막 변경 1건 취소 (Ctrl+Z) — 같은 칸 연속 입력은 1건으로 묶임">↶ 되돌리기{undoCount > 0 ? ` ${undoCount}` : ''}</button>
             <div className="spacer" />
             <input
               className="input input--search"
@@ -1214,10 +1273,20 @@ function InventoryPage({ ctx }) {
           <div className="tbl-footnote no-print">
             <span>행 <strong style={{ color: 'var(--ink-900)' }}>{visibleLots.length}</strong> · 오늘 입력 <strong style={{ color: 'var(--ink-900)' }}>{currentCount}</strong></span>
             <div style={{ flex: 1 }} />
-            <span>오늘 열에서 Enter → 아래 칸 이동 · 엑셀 열 복사 후 붙여넣기(Ctrl+V) → 아래로 자동 채움 · 자동 저장 · 번호 칸 드래그로 여러 행 선택 → 일괄 삭제</span>
+            <span>오늘 열에서 Enter → 아래 칸 이동 · 엑셀 열 복사 후 붙여넣기(Ctrl+V) → 아래로 자동 채움 · 자동 저장 · 번호 칸 드래그로 여러 행 선택 → 일괄 삭제 · Ctrl+Z 되돌리기</span>
           </div>
         </Card>
       </div>
+
+      {/* 드래그 놓은 지점 옆 일괄삭제 팝오버 — 선택이 있는 동안만 */}
+      {popoverPos && selectedIds.size > 0 && (
+        <div className="inv-select-popover no-print" style={{ left: popoverPos.x, top: popoverPos.y }}>
+          <button className="btn btn--sm btn--danger" onClick={bulkDelete}>
+            <Icon name="trash" size={11} /> 선택 {selectedIds.size}건 삭제
+          </button>
+          <button className="btn btn--sm" onClick={clearSelection} title="선택 해제 (Esc)">×</button>
+        </div>
+      )}
 
       {bulkOpen && (
         <BulkAddModal
