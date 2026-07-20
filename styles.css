@@ -1647,6 +1647,17 @@ button { background: none; border: none; cursor: pointer; }
   text-align: right;
 }
 
+/* 컬럼 성격별 배경 — 재고(청록)·가용(중성)·필요(웜)·제조(블루). --td(오늘)는 한 단계 진하게.
+   table.…tr 표기는 zebra(.tbl tbody tr:nth-child(even) td)보다 우선하기 위한 명시도 확보. */
+table.inkplan-tbl tbody tr td.inkplan-cell--stock { background: oklch(0.985 0.012 200); }
+table.inkplan-tbl tbody tr td.inkplan-cell--avail { background: oklch(0.985 0.003 250); }
+table.inkplan-tbl tbody tr td.inkplan-cell--need  { background: oklch(0.985 0.018 55); }
+table.inkplan-tbl tbody tr td.inkplan-cell--manu  { background: oklch(0.987 0.012 245); }
+table.inkplan-tbl tbody tr td.inkplan-cell--stock.inkplan-cell--td { background: oklch(0.963 0.028 200); }
+table.inkplan-tbl tbody tr td.inkplan-cell--avail.inkplan-cell--td { background: oklch(0.972 0.01 250); }
+table.inkplan-tbl tbody tr td.inkplan-cell--need.inkplan-cell--td  { background: oklch(0.965 0.035 55); }
+table.inkplan-tbl tbody tr td.inkplan-cell--manu.inkplan-cell--td  { background: oklch(0.963 0.028 245); }
+
 /* 당일 보기: 표 자체를 적정 폭으로 제한 (좌우로 늘어지지 않도록) */
 .inkplan-tbl-wrap--narrow { max-width: 720px; }
 .inkplan-tbl-wrap--narrow .inkplan-tbl { width: 100%; }

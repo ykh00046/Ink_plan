@@ -146,13 +146,12 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
 
         return (
           <React.Fragment key={d}>
+            {/* 컬럼 성격별 배경(styles.css) — 재고=청록·가용=중성·필요=웜·제조=블루, 오늘은 --today로 한 단계 진하게 */}
             <td
-              className="num inkplan-cell"
-              style={{
-                background: stockFromInv
-                  ? (isToday ? 'oklch(0.93 0.05 200)' : 'oklch(0.96 0.03 200)')
-                  : cellBg,
-              }}
+              className={`num inkplan-cell inkplan-cell--stock${isToday ? ' inkplan-cell--td' : ''}`}
+              style={stockFromInv
+                ? { background: isToday ? 'oklch(0.93 0.05 200)' : 'oklch(0.96 0.03 200)' }
+                : undefined}
               title={stockFromInv
                 ? '재고 조사에서 자동 입력 (Lot 합산). 수동 수정 가능 — 단 재고 조사 변경 시 그 값으로 덮어씌워짐'
                 : ''}
@@ -163,19 +162,17 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
                 onCommit={v => onUpdateCell(ink.name, d, '현재고', v)}
               />
             </td>
-            <td className="num inkplan-cell inkplan-cell--readonly" style={{
+            <td className={`num inkplan-cell inkplan-cell--readonly inkplan-cell--avail${isToday ? ' inkplan-cell--td' : ''}`} style={{
               color: avColor,
               fontWeight: av != null && Number(av) <= 3 ? 600 : 400,
-              background: cellBg,
             }}>
               {fmtNum(av)}
             </td>
             {d === today && (
               // 필요 = 부족량만 양수로 표시 (잉여·미산출은 공란) — 내부 부호는 알림·자동배정용으로 유지
               <td
-                className="num inkplan-cell inkplan-cell--readonly"
+                className="num inkplan-cell inkplan-cell--readonly inkplan-cell--need inkplan-cell--td"
                 style={{
-                  background: cellBg,
                   color: 'var(--bad-600)',
                   fontWeight: 600,
                 }}
@@ -184,11 +181,11 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
                 {weeklyNeed != null && Number(weeklyNeed) < 0 ? fmtNum(Math.abs(weeklyNeed)) : ''}
               </td>
             )}
-            <td className="num inkplan-cell inkplan-cell--manu" style={{
-              background: dd['제조량'] ? 'var(--brand-50)' : cellBg,
-              color: dd['제조량'] ? 'var(--brand-700)' : 'inherit',
-              fontWeight: dd['제조량'] ? 600 : 400,
-            }}>
+            <td className={`num inkplan-cell inkplan-cell--manu${isToday ? ' inkplan-cell--td' : ''}`} style={dd['제조량'] ? {
+              background: 'var(--brand-50)',
+              color: 'var(--brand-700)',
+              fontWeight: 600,
+            } : undefined}>
               <CellNumInput
                 value={dd['제조량']}
                 focusCol={`${d}:제조량`}
@@ -490,12 +487,13 @@ function InkPlanPage({ ctx }) {
                 <tr>
                   {visibleDays.map(d => (
                     <React.Fragment key={d}>
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>재고</th>
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>가용</th>
+                      {/* 서브헤더도 컬럼 색과 동일 계열 — 오늘은 한 단계 진하게 */}
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.945 0.035 200)' : 'oklch(0.972 0.016 200)' }}>재고</th>
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.955 0.015 250)' : 'oklch(0.975 0.004 250)' }}>가용</th>
                       {d === today && (
-                        <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>필요</th>
+                        <th className="num inkplan-sub" style={{ background: 'oklch(0.945 0.045 55)' }}>필요</th>
                       )}
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.97 0.04 245)' : undefined }}>제조</th>
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.945 0.035 245)' : 'oklch(0.972 0.016 245)' }}>제조</th>
                     </React.Fragment>
                   ))}
                 </tr>
