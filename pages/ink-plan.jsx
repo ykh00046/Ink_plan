@@ -488,12 +488,12 @@ function InkPlanPage({ ctx }) {
                   {visibleDays.map(d => (
                     <React.Fragment key={d}>
                       {/* 서브헤더도 컬럼 색과 동일 계열 — 오늘은 한 단계 진하게 */}
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.935 0.055 190)' : 'oklch(0.963 0.03 190)' }}>재고</th>
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.955 0.015 250)' : 'oklch(0.975 0.004 250)' }}>가용</th>
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.88 0.12 165)' : 'oklch(0.93 0.09 165)' }}>재고</th>
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.94 0.018 250)' : 'oklch(0.965 0.008 250)' }}>가용</th>
                       {d === today && (
-                        <th className="num inkplan-sub" style={{ background: 'oklch(0.945 0.045 55)' }}>필요</th>
+                        <th className="num inkplan-sub" style={{ background: 'oklch(0.9 0.1 55)' }}>필요</th>
                       )}
-                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.94 0.048 262)' : 'oklch(0.966 0.026 262)' }}>제조</th>
+                      <th className="num inkplan-sub" style={{ background: d === today ? 'oklch(0.88 0.12 265)' : 'oklch(0.93 0.085 265)' }}>제조</th>
                     </React.Fragment>
                   ))}
                 </tr>
