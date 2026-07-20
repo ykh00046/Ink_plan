@@ -958,3 +958,124 @@ test('addInkToMaster: 이미 같은 정규화 이름이 inkPlan에 있으면 ink
   // inkPlan은 길이 그대로 (중복 prepend 안 함)
   assert.equal(next.inkPlan.length, 1);
 });
+
+// ── 주차 롤오버(week-rollover) 헬퍼 ──────────────────────────────────────────
+// 마스터(호기·잉크 목록)는 유지하면서 입력 셀만 비운다 — 요일 키 데이터라 주가
+// 바뀌어도 지난주 계획이 남는 문제를 해결.
+
+test('clearInjectionSchedule: schedule 은 {} 로, machine/machineNo 등 필드는 보존, 원본 미변경', () => {
+  const injection = {
+    '3층': [
+      { machine: '10호기', machineNo: 10, no: 'A', schedule: { 월: { day: 'P1', night: 'P2' }, 화: { day: 'P3' } } },
+      { machine: '11호기', machineNo: 11, schedule: { 월: { day: 'X' } } },
+    ],
+    '1층': [
+      { machine: '1호기', machineNo: 1, schedule: { 수: { day: 'Y' } } },
+    ],
+  };
+  const before = JSON.parse(JSON.stringify(injection));
+
+  const cleared = DataService.clearInjectionSchedule(injection);
+
+  // 모든 schedule 이 빈 객체
+  assert.deepEqual(cleared['3층'][0].schedule, {});
+  assert.deepEqual(cleared['3층'][1].schedule, {});
+  assert.deepEqual(cleared['1층'][0].schedule, {});
+
+  // machine/machineNo/no 등 다른 필드는 보존
+  assert.equal(cleared['3층'][0].machine, '10호기');
+  assert.equal(cleared['3층'][0].machineNo, 10);
+  assert.equal(cleared['3층'][0].no, 'A');
+  assert.equal(cleared['1층'][0].machineNo, 1);
+
+  // floor 키 보존
+  assert.deepEqual(Object.keys(cleared).sort(), ['1층', '3층']);
+
+  // 원본 입력 미변경
+  assert.deepEqual(injection, before);
+  // 원본 schedule 셀이 여전히 남아 있는지(미변경 추가 검증)
+  assert.equal(injection['3층'][0].schedule['월'].day, 'P1');
+
+  // null/undefined → {}
+  assert.deepEqual(DataService.clearInjectionSchedule(null), {});
+  assert.deepEqual(DataService.clearInjectionSchedule(undefined), {});
+});
+
+test('clearInkPlanDays: days 는 blank 형태로 리셋, 다른 필드는 보존, 원본 미변경', () => {
+  const inkPlan = [
+    { name: '빨강', testStatus: 'ongoing', days: { 월: { '현재고': 10, '제조량': 5 }, 화: { '필요수량': 3 } } },
+    { name: '파랑', days: { 월: { '현재고': 7 } } },
+  ];
+  const before = JSON.parse(JSON.stringify(inkPlan));
+
+  const cleared = DataService.clearInkPlanDays(inkPlan);
+
+  // WEEKDAYS 키를 모두 가짐
+  const dayKeys = Object.keys(cleared[0].days);
+  for (const d of DataService.WEEKDAYS) assert.ok(dayKeys.includes(d), `요일 ${d} 누락`);
+
+  // blank 형태 검증
+  assert.equal(cleared[0].days['월']['현재고'], null);
+  assert.equal(cleared[0].days['화']['필요수량'], undefined); // 월이 아니므로 undefined
+  assert.equal(cleared[0].days['월']['필요수량'], null);      // 월은 null
+
+  // 다른 필드 보존
+  assert.equal(cleared[0].name, '빨강');
+  assert.equal(cleared[0].testStatus, 'ongoing');
+  assert.equal(cleared[1].name, '파랑');
+
+  // 원본 미변경
+  assert.deepEqual(inkPlan, before);
+  assert.equal(inkPlan[0].days['월']['현재고'], 10);
+
+  // null → []
+  assert.deepEqual(DataService.clearInkPlanDays(null), []);
+  assert.deepEqual(DataService.clearInkPlanDays(undefined), []);
+});
+
+test('startNewPlanWeek: planWeek 설정, 둘 다 비우고, products/inventory 등은 참조로 보존', () => {
+  const products = [{ name: 'P1' }];
+  const inventory = [{ ink: '빨강' }];
+  const data = {
+    planWeek: '2026-W29',
+    products,
+    inventory,
+    injection: { '3층': [{ machine: '10호기', schedule: { 월: { day: 'P1' } } }] },
+    inkPlan: [{ name: '빨강', days: { 월: { '현재고': 3 } } }],
+    extra: 'keep-me',
+  };
+  const beforeInjection = JSON.parse(JSON.stringify(data.injection));
+  const beforeInkPlan = JSON.parse(JSON.stringify(data.inkPlan));
+
+  const next = DataService.startNewPlanWeek(data, '2026-W30');
+
+  // planWeek 교체
+  assert.equal(next.planWeek, '2026-W30');
+  // 사출·잉크 셀 비움
+  assert.deepEqual(next.injection['3층'][0].schedule, {});
+  assert.equal(next.injection['3층'][0].machine, '10호기');
+  assert.deepEqual(Object.keys(next.inkPlan[0].days), DataService.WEEKDAYS.slice());
+  assert.equal(next.inkPlan[0].name, '빨강');
+
+  // 관련 없는 최상위 키는 참조로 보존(얕은 복사)
+  assert.equal(next.products, products);
+  assert.equal(next.inventory, inventory);
+  assert.equal(next.extra, 'keep-me');
+
+  // 입력 미변경
+  assert.deepEqual(data.injection, beforeInjection);
+  assert.deepEqual(data.inkPlan, beforeInkPlan);
+  assert.equal(data.planWeek, '2026-W29'); // 원본 planWeek 도 그대로
+
+  // 빈 weekLabel → '' (빈문자열)
+  const noWeek = DataService.startNewPlanWeek(data, '');
+  assert.equal(noWeek.planWeek, '');
+  const falsyWeek = DataService.startNewPlanWeek(data, undefined);
+  assert.equal(falsyWeek.planWeek, '');
+
+  // null data 도 안전
+  const empty = DataService.startNewPlanWeek(null, 'W');
+  assert.equal(empty.planWeek, 'W');
+  assert.deepEqual(empty.injection, {});
+  assert.deepEqual(empty.inkPlan, []);
+});

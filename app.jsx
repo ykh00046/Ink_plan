@@ -155,6 +155,51 @@ function App() {
     // cleanup 반환 없음 — 의도적(위 주석 참조)
   }, [data]);
 
+  // 주차 롤오버 — 사출·잉크계획은 요일 키 데이터라 주가 바뀌어도 지난주 계획이 그대로
+  // 남는다(사용자 보고). 로드 후 1회: data.planWeek ≠ 현재 주차면
+  //   ① 이전 계획을 이전 주차 라벨로 최종 스냅샷(멱등 덮어쓰기 — 기록 조회에서 열람)
+  //   ② 계획 셀만 비움(제품·잉크 마스터, 재고 조사는 유지)  ③ planWeek 갱신.
+  // 첫 도입(planWeek 없음)은 이번 주 스냅샷 존재 여부로 추론: 있으면 이번 주에 이미 앱을
+  // 쓴 것(자동 마감이 4초 내 적재)이므로 현재 데이터는 이번 주 것 → 비우지 않고 주차만 기록.
+  // 없으면 이번 주 첫 실행 → 남은 계획은 지난주 것 → 지난주 라벨로 적재 후 비움.
+  const rolloverRef = useRef(false);
+  useEffect(() => {
+    if (rolloverRef.current || !data) return;
+    rolloverRef.current = true;
+    const cur = DataService.getWeekInfo().isoLabel;
+    if (data.planWeek === cur) return;
+
+    const doRollover = (oldLabel) => {
+      const old = dataRef.current || data;
+      try {
+        fetch('/api/snapshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week: oldLabel, data: old, summary: DataService.buildWeeklyInkSummary(old) }),
+        }).catch(e => console.warn('[주차 롤오버] 스냅샷 실패(무시):', e));
+      } catch (e) { /* 스냅샷 실패해도 롤오버는 진행 */ }
+      setData(DataService.startNewPlanWeek(old, cur));
+      notify(`지난주(${oldLabel}) 계획 마감 — 새 주(${cur}) 시작, 사출·잉크계획을 비웠습니다`);
+    };
+
+    if (data.planWeek) { doRollover(data.planWeek); return; }
+    // 첫 도입 마이그레이션 — planWeek 가 없어 현재 데이터가 몇 주차 것인지 모른다.
+    // 이번 주 스냅샷 존재만으론 판정 불가(자동 마감이 지난주 잔재를 이번 주 라벨로 적재했을
+    // 수 있음) → 지난주 스냅샷과 사출계획 내용이 "같으면" 지난주 잔재로 판정하고 비운다.
+    // 다르면(이번 주 입력이 이미 있음) 비우지 않고 주차만 기록. 판정 불가 시에도 비우지 않음.
+    const prev = DataService.getWeekInfo(new Date(Date.now() - 7 * 86400000)).isoLabel;
+    const keepAndStamp = () => setData({ ...(dataRef.current || data), planWeek: cur });
+    fetch(`/api/snapshot?week=${encodeURIComponent(prev)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(snap => {
+        const prevInj = snap && snap.injection ? JSON.stringify(snap.injection) : null;
+        const curInj = JSON.stringify((dataRef.current || data).injection || {});
+        if (prevInj && prevInj === curInj) doRollover(prev);
+        else keepAndStamp();
+      })
+      .catch(keepAndStamp);
+  }, [data]);
+
   // 초기 로드: 파일 DB API 우선, 실패하면 localStorage → /api/seed fallback
   useEffect(() => {
     const safeMigrate = (raw, source) => {

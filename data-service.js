@@ -1277,6 +1277,52 @@
     return result;
   }
 
+  // ── 주차 롤오버(week-rollover) 순수 헬퍼 ──────────────────────────────────
+  // 배경: 요일 키(월~일) 기반 데이터라 주가 바뀌어도 지난주 계획이 남는 문제가 있다.
+  //       → 주차 롤오버 시 "셀만 비우고" 마스터(호기·잉크 목록)는 유지해야 다음 주에도
+  //       같은 구조로 입력할 수 있다. 아래 3개 함수는 모두 새 객체를 반환(불변).
+
+  // (1) 사출 스케줄 비우기 — 각 호기 객체의 schedule 만 {} 로 교체하고
+  //     machine/machineNo/no 등 나머지 필드는 그대로 보존. null/undefined → {}.
+  function clearInjectionSchedule(injection) {
+    if (injection == null) return {};
+    const next = {};
+    for (const floor of Object.keys(injection)) {
+      next[floor] = (injection[floor] || []).map(machine => ({
+        ...machine,
+        schedule: {}, // 모든 plan 셀(월~일/주·야) 초기화, 호기 메타는 보존
+      }));
+    }
+    return next;
+  }
+
+  // (2) 잉크계획 요일 비우기 — 각 잉크의 days 를 addInkToMaster 의 blank 와 동일한
+  //     WEEKDAYS 키 구조로 새로 만들어 교체, name 등 다른 필드는 보존. null → [].
+  function clearInkPlanDays(inkPlan) {
+    if (inkPlan == null) return [];
+    return (inkPlan || []).map(ink => ({
+      ...ink,
+      // 주가 바뀌어도 지난주 계획이 남는 문제 → 요일 셀만 blank 로 리셋
+      days: Object.fromEntries(WEEKDAYS.map(d => [d, {
+        '현재고': null, '가용일수': null,
+        '필요수량': d === '월' ? null : undefined,
+        '제조량': null,
+      }])),
+    }));
+  }
+
+  // (3) 새 주차 시작 — 사출·잉크계획 셀을 비우고 planWeek 만 교체.
+  //     products/inventory 등 관련 없는 최상위 키는 얕은 복사로 그대로 전달(입력 미변경).
+  function startNewPlanWeek(data, weekLabel) {
+    const d = data || {};
+    return {
+      ...d,
+      injection: clearInjectionSchedule(d.injection),
+      inkPlan: clearInkPlanDays(d.inkPlan),
+      planWeek: String(weekLabel || ''),
+    };
+  }
+
   // 자동 배정 후보: 당일 제조량 비고, 오늘 기준 필요수량 음수(부족)인 정식 잉크. 잠긴 셀 제외.
   function buildAutoAssignCandidates(inkPlan, testInks, today, days, computedByInk) {
     const out = [];
@@ -2049,6 +2095,10 @@
     mergeInkPlanAndTestInks,
     computeInkMetrics,
     buildAutoAssignCandidates,
+    // 주차 롤오버(week-rollover) 순수 헬퍼 — 마스터는 유지, 셀만 비움
+    clearInjectionSchedule,
+    clearInkPlanDays,
+    startNewPlanWeek,
     // review / OCR
     matchOcrRow,
     buildReviewRows,
