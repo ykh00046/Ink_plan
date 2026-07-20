@@ -164,7 +164,7 @@ function InkPlanRow({ ink, visibleDays, today, days, computedByInk, productsUsin
             </td>
             <td className={`num inkplan-cell inkplan-cell--readonly inkplan-cell--avail${isToday ? ' inkplan-cell--td' : ''}`} style={{
               color: avColor,
-              fontWeight: av != null && Number(av) <= 3 ? 600 : 400,
+              fontWeight: av != null && Number(av) <= 3 ? 800 : 600,
             }}>
               {fmtNum(av)}
             </td>
@@ -478,8 +478,8 @@ function InkPlanPage({ ctx }) {
                         className="inkplan-day-head"
                         style={{ background: d === today ? 'oklch(0.96 0.06 245)' : undefined }}
                       >
-                        <div>{d} {d === today && <span style={{ fontSize: 10, color: 'var(--brand-700)', fontWeight: 700 }}>오늘</span>}</div>
-                        <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--ink-500)', marginTop: 2 }}>{dates[d]}</div>
+                        <div>{d} {d === today && <span style={{ fontSize: 11, color: 'var(--brand-700)', fontWeight: 800 }}>오늘</span>}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginTop: 2 }}>{dates[d]}</div>
                       </th>
                     );
                   })}
@@ -559,7 +559,7 @@ function InkNameCell({ name, usedBy, testStatus, statusTone }) {
         onMouseLeave={() => setHover(false)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'default' }}
       >
-        <span style={{ fontWeight: 600 }}>{name}</span>
+        <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink-900)' }}>{name}</span>
         {usedBy.length > 0 && (
           <span className="inkplan-usedby-badge">{usedBy.length}</span>
         )}

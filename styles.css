@@ -1548,18 +1548,21 @@ button { background: none; border: none; cursor: pointer; }
   text-align: center;
   border-left: 2px solid var(--ink-300);
   border-bottom: 1px solid var(--ink-300);
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink-900);
 }
 .inkplan-tbl thead th.inkplan-sub {
   border-bottom: 1px solid var(--ink-300);
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--ink-600);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-800);
 }
 /* 각 요일 첫 컬럼(재고)의 좌측은 굵은 구분선 */
 .inkplan-tbl thead tr:nth-child(2) th.inkplan-sub:not(:first-of-type),
 .inkplan-tbl tbody td.inkplan-cell {
   border-left: 1px solid var(--ink-200);
+  height: 34px;
 }
 .inkplan-tbl thead tr:nth-child(2) th.inkplan-sub:nth-of-type(5n+1) {
   border-left: 2px solid var(--ink-300);
@@ -1573,7 +1576,8 @@ button { background: none; border: none; cursor: pointer; }
 .inkplan-tbl .inkplan-machine-head {
   min-width: 64px;
   text-align: center;
-  font-size: 11px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 .inkplan-tbl .inkplan-namecell {
   padding-left: 12px;
@@ -1604,18 +1608,20 @@ button { background: none; border: none; cursor: pointer; }
 /* 엑셀식 항상 input 셀 */
 .inkplan-cellinp {
   width: 100%;
-  height: 24px;
+  height: 26px;
   padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   color: inherit;
   outline: none;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.inkplan-cellinp--text { text-align: center; font-size: 11px; }
+.inkplan-cellinp--text { text-align: center; font-size: 12px; font-weight: 500; }
 .inkplan-cellinp::placeholder { color: var(--ink-300); }
 .inkplan-cellinp:hover:not(:focus) {
   background: var(--brand-50);
@@ -1629,8 +1635,10 @@ button { background: none; border: none; cursor: pointer; }
 }
 /* read-only 셀(가용·필요)은 input 없이 표시만 */
 .inkplan-tbl td.inkplan-cell--readonly {
-  color: var(--ink-700);
+  color: var(--ink-800);
   background-clip: padding-box;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* 양산대응 잠금 셀 (셀 단위 분기) */
@@ -1684,10 +1692,10 @@ table.inkplan-tbl tbody tr td.inkplan-cell--manu.inkplan-cell--td  { background:
 .inkplan-machine-tag {
   display: inline-flex;
   align-items: center;
-  padding: 1px 8px;
+  padding: 2px 9px;
   border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   background: var(--ink-100);
   color: var(--ink-600);
 }
